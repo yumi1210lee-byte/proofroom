@@ -187,6 +187,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .legend i { width: 18px; height: 0; border-top: 2px solid var(--c); }
 .legend i.dash { border-top-style: dashed; }
 .legend i.dot { border-top-style: dotted; }
+.legend.fin { flex-basis: 100%; margin-left: 0; }
+.legend.fin:empty { display: none; }
+.legend.fin i { width: 14px; height: 14px; border: 0; border-radius: 3px;
+  background: repeating-linear-gradient(135deg, var(--c) 0 3px, color-mix(in srgb, var(--c) 60%, transparent) 3px 6px); }
+.legend.fin .off { opacity: 0.45; }
 
 .hud {
   position: absolute; left: 12px; right: 12px; bottom: 12px;
@@ -289,6 +294,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
         <div class="legend">
           <span><i style="--c:#e6007e"></i>裁切</span><span><i class="dash" style="--c:#0093d0"></i>折線</span><span><i class="dot" style="--c:#e5484d"></i>出血 3 mm</span>
         </div>
+        <div class="legend fin" id="die-fin-legend" aria-label="後加工範圍"></div>
       </div>
     </div>
     <div class="hud" id="hud">
@@ -858,7 +864,7 @@ function makeCD(tex) {
   const rim = plastic(new THREE.CylinderGeometry(60, 60, th, 128, 1, true), 'clear');
   rim.rotation.x = Math.PI / 2;
   g.add(rim);
-  g.traverse((m) => { if (m.isMesh) { m.castShadow = !m.material.userData.noShadow; m.receiveShadow = true; } });
+  g.traverse((m) => { if (m.isMesh) { m.castShadow = !m.material.userData.noShadow; m.receiveShadow = !m.material.userData.noReceive; } });
   return g;
 }
 
@@ -903,7 +909,12 @@ function plasticMat(kind) {
   } else if (kind === 'foam') {
     m = new THREE.MeshStandardMaterial({ color: 0xe4e3dd, roughness: 1 });
   }
-  if (kind.startsWith('clear')) m.userData.noShadow = true;
+  // 透明塑膠幾乎不擋光：不投射主光陰影（否則上蓋下的歌本、底板下的背卡都會整片變暗）。
+  // 物件落在桌面上的陰影仍由內容物與接觸陰影形成
+  // 穿透材質也不接收陰影：three.js 會把落在塑膠表面的陰影一起乘到「透過塑膠看到的畫面」上，
+  // 歌本、背卡的印刷會整片變灰變暗（實測亮度掉約兩成）
+  if (kind.startsWith('clear') || kind === 'glass' || kind === 'glassLid') m.userData.noShadow = true;
+  if (kind === 'glass' || kind === 'glassLid') m.userData.noReceive = true;
   return (matCache['p' + kind] = m);
 }
 
@@ -932,10 +943,18 @@ function ribTexture() {
 // 透明塑膠的「拍起來像真的」處理：
 // 1. 壓低主光的直射高光（多層疊加會變成一大塊亮斑），保留柔光箱的環境反射
 // 2. 亮邊：光在塑膠內部反射後從切邊透出，斜看的面（側牆、切邊）會發亮並帶一點青綠
+// three.js 的穿透材質會以「雙三次模糊 + 依粗糙度降一階 mipmap」取樣後方畫面，
+// 透過上蓋看歌本、透過底板看背卡都會變糊。光滑的 PS 塑膠實際上幾乎不會讓後方影像變模糊，
+// 所以粗糙度很低時改成直接取樣最清晰的一層
+const SHARP_TRANSMISSION = THREE.ShaderChunk.transmission_pars_fragment.replace(
+  'return textureBicubic( transmissionSamplerMap, fragCoord.xy, lod );',
+  'if ( roughness < 0.08 ) return textureLod( transmissionSamplerMap, fragCoord.xy, 0.0 );\n\t\treturn textureBicubic( transmissionSamplerMap, fragCoord.xy, lod );');
+
 function addPlasticLook(m, directSpec, rim, power = 3.0, band = false) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.rimStrength = { value: rim };
     sh.fragmentShader = sh.fragmentShader
+      .replace('#include <transmission_pars_fragment>', SHARP_TRANSMISSION)
       .replace('void main() {', 'uniform float rimStrength;\nvoid main() {')
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
 	reflectedLight.directSpecular *= ${directSpec.toFixed(3)};${band ? `
@@ -1245,7 +1264,7 @@ function buildJewelFromModel(k) {
   // 上蓋（含卡片、卡榫與歌本）以左側轉軸開合
   const pivot = new THREE.Group();
   pivot.position.set(...M.hinge);
-  pivot.rotation.y = -open * 105 * DEG;
+  pivot.rotation.y = -open * 180 * DEG; // 寶麗盒上蓋可以一路打開到攤平
   g.add(pivot);
   const lid = new THREE.Group();
   lid.position.set(-M.hinge[0], -M.hinge[1], -M.hinge[2]);
@@ -1370,7 +1389,7 @@ function buildJewelProcedural(k) {
   // ---- 上蓋：平板 + 上下條紋側牆，轉軸端延伸成樞紐臂；開口側沒有邊框 ----
   const pivot = new THREE.Group();
   pivot.position.set(...M.hinge);
-  pivot.rotation.y = -open * 105 * DEG;
+  pivot.rotation.y = -open * 180 * DEG; // 寶麗盒上蓋可以一路打開到攤平
   g.add(pivot);
   const lid = new THREE.Group();
   lid.position.set(-M.hinge[0], -M.hinge[1], -M.hinge[2]);
@@ -1873,14 +1892,14 @@ const clamp = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v);
 // rough: 表面粗糙度；detail: 紙紋種類；bulk: 每 gsm 的厚度 (µm)；inkDull: 油墨吸收造成的色彩變鈍程度
 const PAPERS = [
   { id: 'coated-gloss', name: '銅版紙', note: '亮面塗佈', color: '#fbfbf9', rough: 0.3, coat: 0.25, detail: 'smooth', detailStrength: 0.12, bulk: 0.9, inkDull: 0 },
-  { id: 'coated-matte', name: '雪銅紙', note: '霧面塗佈', color: '#f8f8f5', rough: 0.62, detail: 'smooth', detailStrength: 0.2, bulk: 1.0, inkDull: 0.03 },
+  { id: 'coated-matte', name: '雪銅紙', note: '霧面塗佈', color: '#f8f8f5', rough: 0.62, detail: 'coated', detailStrength: 0.07, bulk: 1.0, inkDull: 0.03 },
   { id: 'uncoated', name: '模造紙', note: '道林・無塗佈', color: '#f6f4ec', rough: 0.88, detail: 'fiber', detailStrength: 0.5, bulk: 1.25, inkDull: 0.14 },
   { id: 'kraft', name: '牛皮紙', note: '未漂白', color: '#b48a5f', rough: 0.9, detail: 'kraft', detailStrength: 0.75, bulk: 1.3, inkDull: 0.2, colorVar: 0.1 },
   { id: 'black', name: '黑卡紙', note: '全透黑', color: '#1d1d1f', rough: 0.8, detail: 'fiber', detailStrength: 0.45, bulk: 1.2, inkDull: 0.1 },
   { id: 'linen', name: '萊妮紋', note: '布紋美術紙', color: '#f3f0e7', rough: 0.86, detail: 'linen', detailStrength: 0.6, bulk: 1.3, inkDull: 0.12 },
   { id: 'felt', name: '蛋殼紋', note: '羊毛氈紋', color: '#f4f1e9', rough: 0.9, detail: 'felt', detailStrength: 1.0, bulk: 1.35, inkDull: 0.14 },
   { id: 'laid', name: '直紋紙', note: '簾紋美術紙', color: '#f1ede2', rough: 0.86, detail: 'laid', detailStrength: 0.9, bulk: 1.3, inkDull: 0.12 },
-  { id: 'pearl', name: '珠光紙', note: '金屬珠光', color: '#eeeef2', rough: 0.36, detail: 'smooth', detailStrength: 0.15, bulk: 1.05, inkDull: 0.04, metal: 0.45, irid: 0.3 },
+  { id: 'pearl', name: '珠光紙', note: '金屬珠光', color: '#eeeef2', rough: 0.34, detail: 'coated', detailStrength: 0.05, bulk: 1.05, inkDull: 0.04, metal: 0.45, irid: 0.12, pearl: true, pearlT: 0.9 },
   { id: 'recycled', name: '再生紙', note: '含纖維雜點', color: '#e8e2d2', rough: 0.9, detail: 'speck', detailStrength: 0.55, bulk: 1.3, inkDull: 0.16, colorVar: 0.05 },
   { id: 'tracing', name: '描圖紙', note: '半透明', color: '#f2f5f5', rough: 0.45, detail: 'smooth', detailStrength: 0.1, bulk: 0.9, inkDull: 0.04, opacity: 0.62 },
 ];
@@ -2008,6 +2027,8 @@ function detailHeight(type) {
         const chain = Math.exp(-Math.pow((u - 0.5) * 24 / 0.35, 2));
         val = lines * 0.6 + chain * 0.6 + fbm(u, v, 48, 3, 6) * 0.3; break;
       }
+      case 'coated': // 塗佈紙：只有極細的顆粒，沒有低頻的起伏
+        val = fbm(u, v, 128, 2, 1) * 0.25; break;
       default:
         val = fbm(u, v, 32, 4, 2) * 0.4 + fbm(u, v, 128, 2, 1) * 0.2;
     }
@@ -2180,6 +2201,7 @@ function composeSide(o) {
   const rough = new Float32Array(N), metal = new Float32Array(N);
   const coat = new Float32Array(N), coatR = new Float32Array(N);
   const irid = new Float32Array(N), detail = new Float32Array(N);
+  const holo = new Float32Array(N); // 雷射箔的比例（彩虹條紋只出現在雷射箔上）
   const height = new Float32Array(N);
   const det = getDetail(paper.detail);
   const [pr, pg, pb] = o.paperRGB;
@@ -2232,6 +2254,7 @@ function composeSide(o) {
         rough[i] += (F.rough - rough[i]) * a;
         coat[i] *= 1 - a;
         irid[i] += ((F.irid || 0) - irid[i]) * a;
+        holo[i] += ((F.irid ? 1 : 0) - holo[i]) * a;
         detail[i] *= 1 - 0.65 * a;
         height[i] -= imp[i] * 0.04;
       }
@@ -2293,7 +2316,10 @@ function composeSide(o) {
       coatU[j] = clamp(coat[i]) * 255; coatU[j + 1] = clamp(coatR[i]) * 255; coatU[j + 3] = 255;
       if (hasIrid) {
         iridU[j] = clamp(irid[i]) * 255;
-        iridU[j + 1] = (0.5 + 0.5 * Math.sin((x + y * 0.6) / ppm * 0.9 + Math.sin(y / ppm * 0.35) * 2)) * 255;
+        // 薄膜厚度：雷射箔用斜向條紋產生彩虹；珠光紙是均勻的雲母塗層，只有細微的顆粒變化（柔和的珠光，不會出現波浪紋）
+        const band = 0.5 + 0.5 * Math.sin((x + y * 0.6) / ppm * 0.9 + Math.sin(y / ppm * 0.35) * 2);
+        const mica = (paper.pearlT ?? 0.38) + (hash2(x, y, 17) - 0.5) * 0.08;
+        iridU[j + 1] = (mica + (band - mica) * holo[i]) * 255;
         iridU[j + 3] = 255;
       }
       const xl = x > 0 ? i - 1 : i, xr = x < w - 1 ? i + 1 : i;
@@ -3220,7 +3246,7 @@ function rebuildGeometry(frame, recenter = frame) {
   root.rotation.x = -Math.PI / 2;
   root.add(flipper);
   root.scale.setScalar(0.01);
-  root.traverse((o) => { if (o.isMesh) { o.castShadow = !(Array.isArray(o.material) ? false : o.material.userData.noShadow); o.receiveShadow = true; } });
+  root.traverse((o) => { if (o.isMesh) { const u = Array.isArray(o.material) ? {} : o.material.userData; o.castShadow = !u.noShadow; o.receiveShadow = !u.noReceive; } });
   if (recenter || !offset) {
     const b = boundsOf(root);
     offset = new THREE.Vector3(-(b.min.x + b.max.x) / 2, -b.min.y + 0.0004, -(b.min.z + b.max.z) / 2);
@@ -3492,6 +3518,14 @@ function drawDie() {
     showArt: state.dieArt, showFinish: state.dieFinish,
     ink: cs.getPropertyValue('--ink').trim(), muted: cs.getPropertyValue('--muted').trim(), bg: cs.getPropertyValue('--bg').trim(),
   });
+  // 後加工色塊的圖例：列出目前這一面的每一層加工
+  const legend = $('#die-fin-legend');
+  legend.innerHTML = '';
+  for (const L of lastMasks[side]) {
+    const item = el('span', { class: state.dieFinish ? '' : 'off' }, `<i></i>${layerTitle(L)}`);
+    item.firstChild.style.setProperty('--c', FINISHES[L.type].tint);
+    legend.append(item);
+  }
 }
 
 /* ================= 介面 ================= */
@@ -4157,7 +4191,7 @@ async function init() {
 }
 
 // 方便在瀏覽器主控台操作或自動化截圖
-window.proofroom = { state, scene, camera, controls, bounds, key, surfaces: () => surfaces, masks: () => lastMasks, setView: (v) => setView(v, true), selectProduct, regen: regenTextures };
+window.proofroom = { state, scene, camera, renderer, controls, bounds, key, surfaces: () => surfaces, masks: () => lastMasks, setView: (v) => setView(v, true), selectProduct, regen: regenTextures };
 
 init();
 
