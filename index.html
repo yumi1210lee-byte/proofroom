@@ -144,6 +144,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .up .t small { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up .t small.warn { color: var(--danger); white-space: normal; }
 .up .b { display: flex; gap: 6px; }
+.up .spec { grid-column: 1 / -1; font-size: 11.5px; line-height: 1.55; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 5px; }
+.up .spec b { font-weight: 600; color: var(--ink); margin-right: 6px; }
+.svg-pop { width: 200px; gap: 6px; padding: 10px; }
+.svg-pop .btn { justify-content: flex-start; }
 .filebtn { position: relative; overflow: hidden; }
 .filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .sm { padding: 4px 9px; font-size: 12.5px; border-radius: 6px; }
@@ -277,7 +281,10 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
           <button class="btn" id="dl-go">下載</button>
         </div>
       </div>
-      <button id="btn-svg" class="btn ghost" data-download>下載刀模 SVG</button>
+      <div class="dl-wrap" data-download>
+        <button id="btn-svg" class="btn ghost" aria-haspopup="true">下載刀模 SVG</button>
+        <div class="dl-pop svg-pop" id="svg-pop" hidden></div>
+      </div>
     </div>
   </header>
 
@@ -356,7 +363,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
       <h2><span class="n">3</span>圖稿</h2>
       <div class="uploads" id="uploads"></div>
       <label class="check"><input type="checkbox" id="bleed" checked> 上傳的檔案含 3 mm 出血</label>
-      <p class="hint">請依「展開圖」的完成尺寸製作（可下載刀模 SVG 當底圖）。內側圖稿為從內側看的方向。</p>
+      <p class="hint">格式：PNG 或 JPG（RGB 色彩），建議 300 dpi；PNG 的透明處會露出紙色。可下載刀模 SVG 當底圖，比例不符時會拉伸對齊。</p>
     </section>
 
     <section class="sec">
@@ -1672,8 +1679,8 @@ const albumSleeve = (discKind) => ({
 function bookletPieces(x, y, bw, bh) {
   return {
     pieces: [
-      { id: 'bkBack', role: 'back', name: '歌本封底', inName: '歌本封底內', x, y, w: bw, h: bh },
-      { id: 'bkFront', role: 'front', name: '歌本封面', inName: '歌本封面內', x: x + bw, y, w: bw, h: bh },
+      { id: 'bkBack', role: 'back', name: '歌本封底', inName: '歌本封底內', x, y, w: bw, h: bh, group: 'booklet' },
+      { id: 'bkFront', role: 'front', name: '歌本封面', inName: '歌本封面內', x: x + bw, y, w: bw, h: bh, group: 'booklet' },
     ],
     folds: [{ x1: x + bw, y1: y, x2: x + bw, y2: y + bh }],
   };
@@ -1731,13 +1738,13 @@ const PRODUCTS = [
   },
   {
     id: 'lp12', group: 'album', name: '黑膠 12" 單封套', sub: '314 × 314 mm',
-    dims: { w: 314, h: 314, vinyl: 'black' }, fields: ['w', 'h'], gsm: 350, disc: 0.35, discLabel: '黑膠圓標',
+    dims: { w: 314, h: 314, vinyl: 'black' }, fields: ['w', 'h'], gsm: 350, disc: 0.35, discLabel: '黑膠圓標', discMM: 100,
     options: [{ key: 'vinyl', label: '唱片顏色', choices: VINYL_CHOICES, geometryOnly: true }],
     ...albumSleeve('lp12'),
   },
   {
     id: 'lp12gf', group: 'album', name: '黑膠 12" 雙開', sub: 'Gatefold',
-    dims: { w: 314, h: 314, s: 6, vinyl: 'black' }, fields: ['w', 'h', 's'], gsm: 350, open: 0.15, disc: 0.3, discLabel: '黑膠圓標',
+    dims: { w: 314, h: 314, s: 6, vinyl: 'black' }, fields: ['w', 'h', 's'], gsm: 350, open: 0.15, disc: 0.3, discLabel: '黑膠圓標', discMM: 100,
     options: [{ key: 'vinyl', label: '唱片顏色', choices: VINYL_CHOICES, geometryOnly: true }],
     layout: (d) => spineLayout(d.w, d.h, d.s),
     build(k) {
@@ -1776,7 +1783,7 @@ const PRODUCTS = [
   },
   {
     id: 'lp7', group: 'album', name: '黑膠 7" 單曲', sub: '184 × 184 mm',
-    dims: { w: 184, h: 184, vinyl: 'black' }, fields: ['w', 'h'], gsm: 300, disc: 0.35, discLabel: '黑膠圓標',
+    dims: { w: 184, h: 184, vinyl: 'black' }, fields: ['w', 'h'], gsm: 300, disc: 0.35, discLabel: '黑膠圓標', discMM: 88,
     options: [{ key: 'vinyl', label: '唱片顏色', choices: VINYL_CHOICES, geometryOnly: true }],
     ...albumSleeve('lp7'),
   },
@@ -1803,7 +1810,8 @@ const PRODUCTS = [
       const L = spineLayout(d.w, d.h, d.s);
       if (d.booklet === 'none') return L;
       const b = bookletPieces(0, d.h + 12, d.bw, d.bh);
-      return { W: Math.max(L.W, d.bw * 2), H: d.h + 12 + d.bh, pieces: [...L.pieces, ...b.pieces], folds: [...L.folds, ...b.folds] };
+      // groups：同一張展開圖上的不同部件，圖稿與遮罩可以分開上傳
+      return { W: Math.max(L.W, d.bw * 2), H: d.h + 12 + d.bh, pieces: [...L.pieces, ...b.pieces], folds: [...L.folds, ...b.folds], groups: { main: '外盒', booklet: '歌本' } };
     },
     build(k) {
       const { d, t, open } = k;
@@ -1870,6 +1878,7 @@ const PRODUCTS = [
           { id: 'spB', role: 'spine', name: '側標', inName: '側標內側', x: 388, y: 1, w: 6.5, h: 118 },
         ],
         folds: [...b.folds, { x1: 388, y1: 1, x2: 388, y2: 119 }],
+        groups: { booklet: '歌本', main: '背卡' },
       };
     },
     build(k) {
@@ -3345,6 +3354,51 @@ function setBackground() {
   if (scene.fog) scene.fog.color.set(state.bg);
 }
 
+/* ================= 圖稿分組 ================= */
+
+// 同一張展開圖上可能有數個部件（例如 Digipak 外盒與歌本），各自的圖稿與遮罩分開上傳，
+// 再依部件位置貼回展開圖。沒有 layout.groups 的品項只有一組，涵蓋整張展開圖
+function artGroups() {
+  if (!layout.groups) return [{ id: 'main', name: '', pieces: layout.pieces, rect: { x: 0, y: 0, w: layout.W, h: layout.H } }];
+  return Object.entries(layout.groups).map(([id, name]) => {
+    const pieces = layout.pieces.filter((p) => (p.group || 'main') === id);
+    if (!pieces.length) return null;
+    const x0 = Math.min(...pieces.map((p) => p.x)), y0 = Math.min(...pieces.map((p) => p.y));
+    const x1 = Math.max(...pieces.map((p) => p.x + p.w)), y1 = Math.max(...pieces.map((p) => p.y + p.h));
+    return { id, name, pieces, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+  }).filter(Boolean);
+}
+const artKey = (side, gid) => (gid === 'main' ? side : `${side}:${gid}`);
+// 內側展開圖是左右翻轉的，部件位置也跟著翻
+const sideRect = (g, side) => (side === 'out' ? g.rect : { ...g.rect, x: layout.W - g.rect.x - g.rect.w });
+
+// 把部件的圖稿（含出血時連同出血）貼到整張展開圖上
+function placeOnSheet(ctx, img, g, side, w, h) {
+  const r = sideRect(g, side), b = state.bleed ? BLEED : 0;
+  const sx = w / layout.W, sy = h / layout.H;
+  ctx.clearRect((r.x - b) * sx, (r.y - b) * sy, (r.w + 2 * b) * sx, (r.h + 2 * b) * sy);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, (r.x - b) * sx, (r.y - b) * sy, (r.w + 2 * b) * sx, (r.h + 2 * b) * sy);
+}
+
+function blankCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+// 子版面：只含某個部件，座標移到原點（刀模 SVG 分開輸出用）
+function groupLayout(g) {
+  const { x, y, w, h } = g.rect, e = 0.01;
+  return {
+    W: w, H: h,
+    pieces: g.pieces.map((p) => ({ ...p, x: p.x - x, y: p.y - y })),
+    folds: layout.folds
+      .filter((f) => f.x1 >= x - e && f.x1 <= x + w + e && Math.min(f.y1, f.y2) >= y - e && Math.max(f.y1, f.y2) <= y + h + e)
+      .map((f) => ({ x1: f.x1 - x, y1: f.y1 - y, x2: f.x2 - x, y2: f.y2 - y })),
+  };
+}
+
 /* ================= 材質合成 ================= */
 
 let surfaces = { out: null, in: null };
@@ -3377,11 +3431,23 @@ function regenTextures() {
   const imgId = (img) => (img._pid ||= ++imgSeq);
 
   const artData = {};
+  const groups = artGroups();
   for (const side of ['out', 'in']) {
-    const a = state.art[side];
-    artData[side] = a
-      ? cached(`art${imgId(a.img)}`, () => readPixels(rasterize(a.img, w, h, bleed)))
-      : cached(`sample-art-${side}`, () => readPixels(sampleCanvas(layout, side, 'art', ppm)));
+    if (groups.length === 1) {
+      const a = state.art[side];
+      artData[side] = a
+        ? cached(`art${imgId(a.img)}`, () => readPixels(rasterize(a.img, w, h, bleed)))
+        : cached(`sample-art-${side}`, () => readPixels(sampleCanvas(layout, side, 'art', ppm)));
+      continue;
+    }
+    // 多個部件：沒上傳的部件沿用範例圖稿，上傳的部件貼在各自的位置
+    const parts = groups.map((g) => state.art[artKey(side, g.id)]);
+    artData[side] = cached(`artg-${side}-${parts.map((a) => (a ? imgId(a.img) : 's')).join('-')}`, () => {
+      const c = parts.every(Boolean) ? blankCanvas(w, h) : sampleCanvas(layout, side, 'art', ppm);
+      const ctx = c.getContext('2d');
+      groups.forEach((g, i) => { if (parts[i]) placeOnSheet(ctx, parts[i].img, g, side, w, h); });
+      return readPixels(c);
+    });
   }
 
   mark('art');
@@ -3396,7 +3462,13 @@ function regenTextures() {
       m = sampleMask(L.side, FINISHES[L.type].sample);
       if (L.invert) m = m.map((v) => 1 - v);
     } else if (L.src === 'upload') {
-      if (L.img) m = cached(`mask${imgId(L.img)}-${L.invert}`, () => coverage(readPixels(rasterize(L.img, w, h, bleed)), L.invert));
+      const g = groups.length > 1 ? groups.find((x) => x.id === L.group) || groups[0] : null;
+      if (L.img && !g) m = cached(`mask${imgId(L.img)}-${L.invert}`, () => coverage(readPixels(rasterize(L.img, w, h, bleed)), L.invert));
+      else if (L.img) m = cached(`mask${imgId(L.img)}-${L.invert}-${g.id}-${L.side}`, () => {
+        const c = blankCanvas(w, h);
+        placeOnSheet(c.getContext('2d'), L.img, g, L.side, w, h);
+        return coverage(readPixels(c), L.invert);
+      });
     } else {
       m = coverageFromArt(artData[L.side], L.src, L.thr, L.invert);
     }
@@ -3469,6 +3541,8 @@ function scheduleTextures(delay = 40) {
 function rebuildLayout(frame) {
   layout = product().layout(dims());
   updateSheetInfo();
+  renderUploads(); // 上傳欄位、建議尺寸與遮罩的部件選項都依版面而定
+  renderLayers();
   regenTextures();
   rebuildGeometry(frame, true);
 }
@@ -3571,8 +3645,6 @@ function selectProduct(id) {
   state.disc = P.disc ?? 0;
   renderProducts();
   syncProductUI();
-  renderUploads();
-  renderLayers();
   rebuildLayout(true);
 }
 
@@ -3607,7 +3679,11 @@ function syncProductUI() {
 function updateSheetInfo() {
   const { W, H } = layout;
   const px = (mm) => Math.round(((mm + 2 * BLEED) / 25.4) * 300);
-  let html = `展開 ${fmt(W)} × ${fmt(H)} mm<br>含出血 ${fmt(W + 2 * BLEED)} × ${fmt(H + 2 * BLEED)} mm・300 dpi = ${px(W)} × ${px(H)} px<br>紙厚約 ${thickness().toFixed(2)} mm`;
+  const groups = artGroups();
+  let html = groups.length === 1
+    ? `展開 ${fmt(W)} × ${fmt(H)} mm<br>含出血 ${fmt(W + 2 * BLEED)} × ${fmt(H + 2 * BLEED)} mm・300 dpi = ${px(W)} × ${px(H)} px`
+    : groups.map((g) => `${g.name}展開 ${fmt(g.rect.w)} × ${fmt(g.rect.h)} mm（含出血 ${fmt(g.rect.w + 2 * BLEED)} × ${fmt(g.rect.h + 2 * BLEED)}）`).join('<br>');
+  html += `<br>紙厚約 ${thickness().toFixed(2)} mm`;
   if (state.product === 'digipak') {
     const need = digipakNeeds(dims());
     if (dims().s < need) html += `<br><span class="warn">托盤加歌本合起來約需書背 ${need} mm，目前 ${dims().s} mm 會闔不起來</span>`;
@@ -3729,10 +3805,11 @@ function bindPaper() {
 
 /* ---------- 3 圖稿 ---------- */
 
-function aspectWarning(img, forDisc) {
+function aspectWarning(img, forDisc, g = artGroups()[0]) {
   if (!img) return '';
   const r = img.naturalWidth / img.naturalHeight;
-  const target = forDisc ? 1 : state.bleed ? (layout.W + 2 * BLEED) / (layout.H + 2 * BLEED) : layout.W / layout.H;
+  const { w: gw, h: gh } = g.rect;
+  const target = forDisc ? 1 : state.bleed ? (gw + 2 * BLEED) / (gh + 2 * BLEED) : gw / gh;
   const diff = Math.abs(r / target - 1);
   return diff > 0.02 ? `比例與展開圖相差 ${Math.round(diff * 100)}%，已拉伸對齊` : '';
 }
@@ -3741,14 +3818,16 @@ function renderUploads() {
   const box = $('#uploads');
   box.innerHTML = '';
   const names = sideNames();
-  const slots = [
-    ['out', `${names[0]}圖稿`],
-    ['in', `${names[1]}圖稿`],
-  ];
-  if (product().discLabel) slots.push(['disc', product().discLabel]);
-  for (const [slot, title] of slots) {
+  const groups = artGroups();
+  const slots = [];
+  for (const g of groups) {
+    slots.push([artKey('out', g.id), `${g.name}${names[0]}圖稿`, g, 'out']);
+    slots.push([artKey('in', g.id), `${g.name}${names[1]}圖稿`, g, 'in']);
+  }
+  if (product().discLabel) slots.push(['disc', product().discLabel, null, 'disc']);
+  for (const [slot, title, g, side] of slots) {
     const a = state.art[slot];
-    const warn = a ? aspectWarning(a.img, slot === 'disc') : '';
+    const warn = a ? aspectWarning(a.img, slot === 'disc', g || undefined) : '';
     const row = el('div', { class: 'up' });
     const thumb = el('div', { class: 'thumb' });
     if (a) thumb.style.backgroundImage = `url(${a.img.src})`;
@@ -3760,7 +3839,7 @@ function renderUploads() {
     up.append(input);
     btns.append(up);
     if (a) btns.append(el('button', { class: 'btn ghost sm', onclick: () => { state.art[slot] = null; afterArt(slot); } }, '清除'));
-    row.append(thumb, info, btns);
+    row.append(thumb, info, btns, el('div', { class: 'spec' }, uploadSpec(g, side)));
     row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('drag'); });
     row.addEventListener('dragleave', () => row.classList.remove('drag'));
     row.addEventListener('drop', (e) => {
@@ -3777,9 +3856,38 @@ function renderUploads() {
     const r = el('div', { class: 'row' });
     r.append(el('label', { for: 'disc-base' }, '光碟印刷底'), sel);
     box.append(r);
-    box.append(el('p', { class: 'hint' }, '光碟圖稿做成 120 × 120 mm 正方形。印刷範圍為直徑 34.6–116 mm 的環形，中間 Ø34.6 以內是透明區，不會印刷。'));
     if (state.discBase === 'silver') box.append(el('p', { class: 'hint' }, '銀底時請上傳去背的 PNG，透明（未印刷）的地方會呈現光碟的金屬銀。'));
   }
+}
+
+// 上傳欄位旁的建議規格：尺寸、300 dpi 像素、部件排列方向
+const px300 = (mm) => Math.round((mm / 25.4) * 300);
+function uploadSpec(g, side) {
+  if (side === 'disc') {
+    const cd = !product().discMM;
+    const D = product().discMM || 120;
+    const sz = `<b>尺寸</b>${D} × ${D} mm 正方形・300 dpi 約 ${px300(D)} × ${px300(D)} px`;
+    return cd
+      ? `${sz}<br><b>內容</b>光碟圖案置中；印刷範圍為直徑 34.6–116 mm 的環形，Ø34.6 以內是透明區不印刷`
+      : `${sz}<br><b>內容</b>圓標直徑 ${D} mm，圖案置中做成圓形；中心孔不會印到。A、B 面使用同一張圖`;
+  }
+  const b = state.bleed ? BLEED : 0;
+  const { w, h } = g.rect;
+  const size = `<b>尺寸</b>${fmt(w + 2 * b)} × ${fmt(h + 2 * b)} mm${b ? '（含四邊 3 mm 出血）' : '（完成尺寸，不含出血）'}・300 dpi 約 ${px300(w + 2 * b)} × ${px300(h + 2 * b)} px`;
+  // 依列（y）分組，每列由左至右；內側看的時候左右翻轉
+  const pcs = g.pieces.map((p) => ({ ...p, sx: side === 'out' ? p.x : layout.W - p.x - p.w }));
+  const rows = [];
+  for (const p of [...pcs].sort((a, c) => a.y - c.y || a.sx - c.sx)) {
+    const r = rows.find((q) => Math.abs(q.y - p.y) < 2);
+    if (r) r.items.push(p); else rows.push({ y: p.y, items: [p] });
+  }
+  const label = (p) => (side === 'out' ? p.name : p.inName || p.name);
+  const order = rows.map((r) => r.items.sort((a, c) => a.sx - c.sx).map(label).join('｜')).join('；下排 ');
+  const many = pcs.length > 1;
+  const dir = side === 'out'
+    ? (many ? `由左至右：${order}` : order)
+    : `${many ? `由左至右：${order}` : order}<br><b>方向</b>${product().sides ? '翻到背面看的方向（展開圖左右翻轉）' : '從內側看的方向（展開圖左右翻轉）'}`;
+  return `${size}<br><b>排列</b>${dir}`;
 }
 
 async function setArt(slot, file) {
@@ -3868,6 +3976,13 @@ function layerCard(L) {
   body.append(row('範圍', src));
 
   if (L.src === 'upload') {
+    // 有多個部件時，遮罩檔要指定套用在哪個部件（尺寸與該部件的圖稿相同）
+    const groups = artGroups();
+    if (groups.length > 1) {
+      const gs = el('select', { 'aria-label': '套用部件', onchange: (e) => { L.group = e.target.value; refresh(); } });
+      gs.innerHTML = groups.map((g) => `<option value="${g.id}" ${g.id === (L.group || groups[0].id) ? 'selected' : ''}>${g.name}</option>`).join('');
+      body.append(row('部件', gs));
+    }
     const wrap = el('div', { class: 'inline' });
     const th = el('span', { class: 'mask-thumb' });
     if (L.img) th.style.backgroundImage = `url(${L.img.src})`;
@@ -3881,7 +3996,8 @@ function layerCard(L) {
     fb.append(input);
     wrap.append(th, fb);
     if (L.img) {
-      const warn = aspectWarning(L.img, false);
+      const gg = artGroups();
+      const warn = aspectWarning(L.img, false, gg.find((g) => g.id === L.group) || gg[0]);
       if (warn) wrap.append(el('small', { class: 'hint', style: 'color:var(--danger)' }, warn));
     }
     body.append(row('遮罩檔', wrap));
@@ -4056,12 +4172,24 @@ function bindTop() {
     });
     pop.hidden = true;
   });
-  $('#btn-svg').addEventListener('click', () => {
-    const svg = dielineSVG(layout, product().name, state.dieSide);
-    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-    download(`dieline-${state.product}-${state.dieSide}.svg`, url);
+  // 刀模 SVG：有多個部件時可以分開下載（每個部件一張，與上傳圖稿的尺寸相同）
+  const saveSVG = (lay, title, file) => {
+    const url = URL.createObjectURL(new Blob([dielineSVG(lay, title, state.dieSide)], { type: 'image/svg+xml' }));
+    download(file, url);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  const svgPop = $('#svg-pop');
+  $('#btn-svg').addEventListener('click', () => {
+    const groups = artGroups();
+    if (groups.length === 1) { saveSVG(layout, product().name, `dieline-${state.product}-${state.dieSide}.svg`); return; }
+    svgPop.innerHTML = '';
+    for (const g of groups) {
+      svgPop.append(el('button', { class: 'btn ghost', onclick: () => { saveSVG(groupLayout(g), `${product().name} ${g.name}`, `dieline-${state.product}-${g.id}-${state.dieSide}.svg`); svgPop.hidden = true; } }, `${g.name}刀模`));
+    }
+    svgPop.append(el('button', { class: 'btn ghost', onclick: () => { saveSVG(layout, product().name, `dieline-${state.product}-all-${state.dieSide}.svg`); svgPop.hidden = true; } }, '全部（同一張）'));
+    svgPop.hidden = !svgPop.hidden;
   });
+  document.addEventListener('click', (e) => { if (!svgPop.hidden && !e.target.closest('#svg-pop, #btn-svg')) svgPop.hidden = true; });
   const ds = $('#die-side');
   for (const b of ds.children) b.addEventListener('click', () => {
     state.dieSide = b.dataset.v;
