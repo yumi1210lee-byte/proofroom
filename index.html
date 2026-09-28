@@ -832,7 +832,8 @@ function ringGeo(r0, r1) {
   return g;
 }
 
-// CD 結構（依常見印刷規格，由內到外）：中孔 Ø15 → 透明圈至 Ø34.6（含堆疊環）→ 印刷區 Ø34.6–116 → 外緣 Ø116–120（銀色反光 + 透明邊）
+// CD 結構（由內到外）：中孔 Ø15 → 印刷面透明圈至 Ø23 → 印刷區 Ø23–116 → 外緣 Ø116–120（銀色反光 + 透明邊）
+// 讀取面（背面）：透明圈至 Ø34.6（含堆疊環）→ 反射層
 // tex = { map, orm }：印刷色與金屬度／粗糙度（銀底時未印刷處為金屬）
 function makeCD(tex) {
   const g = new THREE.Group();
@@ -857,16 +858,16 @@ function makeCD(tex) {
     });
   }
   const add = (m, z, flip) => { if (flip) m.rotation.y = Math.PI; m.position.z = z; g.add(m); return m; };
-  add(new THREE.Mesh(ringGeo(17.3, 58), tex.material), th / 2);
+  add(new THREE.Mesh(ringGeo(11.5, 58), tex.material), th / 2);
   add(new THREE.Mesh(ringGeo(58, 59.5), matCache.cdMirror), th / 2);
   add(new THREE.Mesh(ringGeo(17.3, 59.5), matCache.cdData), -th / 2, true);
-  // 透明部分：中央圈（至 Ø34.6）、外緣
-  for (const [r0, r1] of [[7.5, 17.3], [59.5, 60]]) {
-    add(plastic(ringGeo(r0, r1), 'clear'), th / 2);
-    add(plastic(ringGeo(r0, r1), 'clear'), -th / 2, true);
+  // 透明部分：印刷面中央圈（至 Ø23）、讀取面中央圈（至 Ø34.6）、外緣
+  for (const [r0, r1, z, flip] of [[7.5, 11.5, th / 2, false], [7.5, 17.3, -th / 2, true], [59.5, 60, th / 2, false], [59.5, 60, -th / 2, true]]) {
+    add(plastic(ringGeo(r0, r1), 'clear'), z, flip);
   }
+  // 堆疊環在讀取面（印刷面從 Ø23 開始，已涵蓋堆疊環的位置）
   const stack = plastic(new THREE.TorusGeometry(16.6, 0.3, 8, 96), 'clear');
-  stack.position.z = th / 2;
+  stack.position.z = -th / 2;
   g.add(stack);
   const rim = plastic(new THREE.CylinderGeometry(60, 60, th, 128, 1, true), 'clear');
   rim.rotation.x = Math.PI / 2;
@@ -3868,7 +3869,7 @@ function uploadSpec(g, side) {
     const D = product().discMM || 120;
     const sz = `<b>尺寸</b>${D} × ${D} mm 正方形・300 dpi 約 ${px300(D)} × ${px300(D)} px`;
     return cd
-      ? `${sz}<br><b>內容</b>光碟圖案置中；印刷範圍為直徑 34.6–116 mm 的環形，Ø34.6 以內是透明區不印刷`
+      ? `${sz}<br><b>內容</b>光碟圖案置中；印刷範圍為直徑 23–116 mm 的環形，Ø23 以內是透明區不印刷`
       : `${sz}<br><b>內容</b>圓標直徑 ${D} mm，圖案置中做成圓形；中心孔不會印到。A、B 面使用同一張圖`;
   }
   const b = state.bleed ? BLEED : 0;
