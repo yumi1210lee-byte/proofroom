@@ -2467,7 +2467,8 @@ const FOILS = {
   blue: { name: '亮藍', color: [0.2, 0.4, 0.88], metal: 1, rough: 0.15 },
   green: { name: '亮綠', color: [0.2, 0.62, 0.38], metal: 1, rough: 0.15 },
   black: { name: '亮黑', color: [0.035, 0.035, 0.04], metal: 0.6, rough: 0.08 },
-  holo: { name: '雷射（鐳射）', color: [0.92, 0.92, 0.95], metal: 1, rough: 0.08, irid: 1 },
+  // irid：薄膜干涉的強度（細碎的彩紋）；雷射箔主要的彩虹炫光在著色器裡依角度計算（見 holoChunk）
+  holo: { name: '雷射（鐳射）', color: [0.92, 0.92, 0.95], metal: 1, rough: 0.08, irid: 0.15 },
   white: { name: '白色色箔', color: [0.96, 0.96, 0.95], metal: 0, rough: 0.45 },
 };
 
@@ -2869,6 +2870,7 @@ function composeSideData(o) {
         const band = 0.5 + 0.5 * Math.sin((x + y * 0.6) / ppm * 0.9 + Math.sin(y / ppm * 0.35) * 2);
         const mica = (paper.pearlT ?? 0.38) + (hash2(x, y, 17) - 0.5) * 0.08;
         iridU[j + 1] = (mica + (band - mica) * holo[i]) * 255;
+        iridU[j + 2] = clamp(holo[i]) * 255; // 雷射箔範圍（著色器裡加上隨角度變化的彩虹炫光）
         iridU[j + 3] = 255;
       }
       const xl = x > 0 ? i - 1 : i, xr = x < w - 1 ? i + 1 : i;
@@ -2959,6 +2961,30 @@ const detailChunk = THREE.ShaderChunk.normal_fragment_maps.replace(
 	mapN.xy = mapN.xy * normalScale + dN.xy * detailStrength * nmS.a;`
 );
 
+// 雷射箔：銀色金屬底，彩虹只出現在反光強的地方（像真實的雷射箔：打到光、映出亮處的部分才有虹光，其餘是銀色）。
+// 光照算完後，依反射光（specular）的亮度決定彩虹的比例，色相隨觀看角度與位置大片、緩慢地變化。
+// 範圍存在 iridescence 貼圖的藍色通道
+const holoChunk = `
+#ifdef USE_IRIDESCENCEMAP
+{
+  float hb = texture2D( iridescenceMap, vIridescenceMapUv ).b;
+  if ( hb > 0.004 ) {
+    vec3 spec = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
+    float L = dot( spec, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float w = smoothstep( 0.35, 1.4, L ); // 只有亮的反光才帶彩虹
+    float nv = dot( normalize( vNormal ), normalize( vViewPosition ) );
+    vec2 p = vViewPosition.xy;
+    float hue = nv * 1.1 + p.x * 0.6 - p.y * 0.4 + 0.12 * sin( p.x * 2.1 + p.y * 1.3 );
+    vec3 rb = 0.5 + 0.5 * cos( 6.28318 * ( hue + vec3( 0.0, 0.33, 0.67 ) ) );
+    vec3 tint = mix( vec3( 1.0 ), rb * 1.3 + 0.1, 0.55 * w );
+    // 銀底偏一點冷紫（雷射箔常見的底色）
+    tint *= vec3( 0.975, 0.975, 1.03 );
+    outgoingLight += spec * ( tint - 1.0 ) * hb;
+  }
+}
+#endif
+`;
+
 function createPaperMaterial() {
   const u = {
     detailMap: { value: null },
@@ -2971,9 +2997,10 @@ function createPaperMaterial() {
     Object.assign(sh.uniforms, u);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <normalmap_pars_fragment>', '#include <normalmap_pars_fragment>\nuniform sampler2D detailMap;\nuniform vec2 detailRepeat;\nuniform float detailStrength;')
-      .replace('#include <normal_fragment_maps>', detailChunk);
+      .replace('#include <normal_fragment_maps>', detailChunk)
+      .replace('#include <opaque_fragment>', holoChunk + '\n#include <opaque_fragment>');
   };
-  m.customProgramCacheKey = () => 'paper-detail';
+  m.customProgramCacheKey = () => 'paper-detail-holo';
   return m;
 }
 
