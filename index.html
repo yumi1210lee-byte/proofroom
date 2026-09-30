@@ -1376,7 +1376,7 @@ function makeBooklet(k) {
   const bp = k.piece('bkBack'), { W, H } = k.layout;
   // 折線在封底靠封面的那一邊；弧面的 f = 0 端接在展開圖折線的左側那一片
   const foldU = (dir > 0 ? bp.x + bp.w : bp.x) / W, du = ((Math.PI + 2 * sext) * r) / W;
-  const eps = 2 / (k.mats.out.map ? k.mats.out.map.image.width : 2048);
+  const eps = 2 / k.texW;
   const suv = sgeo.attributes.uv;
   for (let i = 0; i < suv.count; i++) {
     const f = suv.getX(i);
@@ -1759,7 +1759,7 @@ function sleeveGeometry(k, pieceId, S, side, outer) {
     return Math.sin((Math.PI / 2) * Math.min(1, Math.max(0, d) / rw));
   };
   const sign = side === 'front' ? 1 : -1;
-  const eps = 2 / (k.mats.out.map ? k.mats.out.map.image.width : 2048);
+  const eps = 2 / k.texW;
   const u0 = p.x / W, uIn0 = (W - p.x - w) / W, uw = w / W, v0 = 1 - (p.y + h) / H, vh = h / H;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i);
@@ -2145,7 +2145,7 @@ const albumSleeve = (discKind) => ({
     const p = k.piece('front');
     const { W, H } = k.layout;
     g.add(sleeveEdges(geos, p.w, p.h, SLEEVE_SEG, matCache.sleeveEdge, {
-      mat: k.mats.out, texW: k.mats.out.map ? k.mats.out.map.image.width : 2048, u: p.x / W, du: (Math.PI * S) / 2 / W, v0: 1 - (p.y + p.h) / H, vh: p.h / H,
+      mat: k.mats.out, texW: k.texW, u: p.x / W, du: (Math.PI * S) / 2 / W, v0: 1 - (p.y + p.h) / H, vh: p.h / H,
     }));
     const disc = discKind === 'cd' ? makeCD(k.discTex)
       : discKind === 'lp7' ? makeVinyl(87.5, 44, k.labelTex, d.vinyl)
@@ -2740,12 +2740,12 @@ function dataTexture(u8, w, h, srgb) {
 }
 
 /**
- * 合成單一面
- * o: { w, h, ppm, paper, paperRGB, lam, art(ImageData|null), layers:[{type,params,mask}], relief, through, cut }
- * 所有陣列皆為畫布順序（第 0 列在上）
+ * 合成單一面（純運算，不碰 DOM／three.js，也在背景執行緒裡執行，見 createTextureWorker）
+ * o: { w, h, ppm, paper, paperRGB, lam, art(RGBA Uint8ClampedArray|null), tint(紙色不均|null), layers:[{type,params,mask}], relief, through, cut }
+ * 所有陣列皆為畫布順序（第 0 列在上）；回傳各貼圖的 RGBA 位元組（第 0 列在下）與預覽圖的像素
  */
-function composeSide(o) {
-  const { w, h, ppm, paper, lam, art, layers } = o;
+function composeSideData(o) {
+  const { w, h, ppm, paper, lam, layers } = o;
   const N = w * h;
   const col = new Float32Array(N * 3);
   const rough = new Float32Array(N), metal = new Float32Array(N);
@@ -2753,7 +2753,7 @@ function composeSide(o) {
   const irid = new Float32Array(N), detail = new Float32Array(N);
   const holo = new Float32Array(N); // 雷射箔的比例（彩虹條紋只出現在雷射箔上）
   const height = new Float32Array(N);
-  const det = getDetail(paper.detail);
+  const tint = o.tint;
   const [pr, pg, pb] = o.paperRGB;
   const dull = (paper.inkDull || 0) + (lam.dull || 0);
   const baseRough = lam.rough ?? paper.rough;
@@ -2761,14 +2761,14 @@ function composeSide(o) {
   const baseCoatR = lam.coatRough ?? 0.12;
   const detailBase = lam.detailMul ?? 1;
   const cv = paper.colorVar || 0;
-  const ad = art ? art.data : null;
+  const ad = o.art;
 
   for (let y = 0; y < h; y++) {
     const ty = (Math.floor((y / ppm / TILE_MM) * TILE) % TILE) * TILE;
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       let f = 1;
-      if (det.tint) f = 1 + det.tint[ty + (Math.floor((x / ppm / TILE_MM) * TILE) % TILE)] * cv;
+      if (tint) f = 1 + tint[ty + (Math.floor((x / ppm / TILE_MM) * TILE) % TILE)] * cv;
       let r = pr * f, g = pg * f, b = pb * f;
       if (ad) {
         const a = ad[i * 4 + 3] / 255;
@@ -2846,8 +2846,7 @@ function composeSide(o) {
   // 打包成貼圖（DataTexture 第 0 列在下，所以寫入時上下翻轉）
   const cU = new Uint8Array(N * 4), ormU = new Uint8Array(N * 4), nU = new Uint8Array(N * 4);
   const coatU = new Uint8Array(N * 4), iridU = new Uint8Array(N * 4);
-  const preview = new ImageData(w, h);
-  const P = preview.data;
+  const P = new Uint8ClampedArray(N * 4);
   const cut = o.cut;
   const alphaU = cut ? new Uint8Array(N * 4) : null;
   const nk = 2.2; // 起伏視覺強度
@@ -2887,15 +2886,67 @@ function composeSide(o) {
       }
     }
   }
+  return { w, h, cU, ormU, nU, coatU, iridU: hasIrid ? iridU : null, alphaU, P };
+}
+
+// 由 composeSideData 的結果建立 three.js 貼圖與預覽圖（主執行緒）
+function surfaceFromData(d) {
+  const { w, h } = d;
   return {
-    map: dataTexture(cU, w, h, true),
-    orm: dataTexture(ormU, w, h, false),
-    normal: dataTexture(nU, w, h, false),
-    coat: dataTexture(coatU, w, h, false),
-    irid: hasIrid ? dataTexture(iridU, w, h, false) : null,
-    alpha: alphaU ? dataTexture(alphaU, w, h, false) : null,
-    preview,
+    map: dataTexture(d.cU, w, h, true),
+    orm: dataTexture(d.ormU, w, h, false),
+    normal: dataTexture(d.nU, w, h, false),
+    coat: dataTexture(d.coatU, w, h, false),
+    irid: d.iridU ? dataTexture(d.iridU, w, h, false) : null,
+    alpha: d.alphaU ? dataTexture(d.alphaU, w, h, false) : null,
+    preview: new ImageData(d.P, w, h),
   };
+}
+
+/* ---------- 背景執行緒 ---------- */
+
+// 兩面的起伏與貼圖合成：主執行緒（備援）與背景執行緒共用這一段
+// job: { w, h, ppm, paper, lam, paperRGB, tint, out: { art, layers }, in: { art, layers }, cut }
+function composeBoth(job) {
+  const { w, h, ppm } = job;
+  const relief = { out: reliefHeight(job.out.layers, w, h, ppm), in: reliefHeight(job.in.layers, w, h, ppm) };
+  // 另一面的壓凸在這一面透出反向的起伏
+  const through = (E) => { if (!E) return null; const r = mirrorX(E, w, h); for (let i = 0; i < r.length; i++) r[i] *= -0.8; return r; };
+  const common = { w, h, ppm, paper: job.paper, lam: job.lam, paperRGB: job.paperRGB, tint: job.tint };
+  const cut = job.cut;
+  return {
+    out: composeSideData({ ...common, art: job.out.art, layers: job.out.layers, relief: relief.out, through: through(relief.in), cut }),
+    in: composeSideData({ ...common, art: job.in.art, layers: job.in.layers, relief: relief.in, through: through(relief.out), cut: cut && mirrorX(cut, w, h) }),
+  };
+}
+
+// 材質合成的背景執行緒：程式碼直接取自這個檔案的函式（不另外載入檔案，單檔版也能用）。
+// 瀏覽器不允許時回傳 null，由呼叫端改在主執行緒計算
+function createTextureWorker() {
+  try {
+    const fns = [hash2, boxPass, blur, mirrorX, reliefHeight, composeSideData, composeBoth];
+    const src = [
+      `const clamp = ${clamp.toString()};`,
+      `const TILE_MM = ${TILE_MM}, TILE = ${TILE};`,
+      `const FOILS = ${JSON.stringify(FOILS)};`,
+      ...fns.map((f) => f.toString()),
+      `self.onmessage = (e) => {
+        const { id, job } = e.data;
+        try {
+          const r = composeBoth(job);
+          const list = [];
+          for (const s of [r.out, r.in]) for (const k of ['cU', 'ormU', 'nU', 'coatU', 'iridU', 'alphaU', 'P']) if (s[k]) list.push(s[k].buffer);
+          self.postMessage({ id, r }, list);
+        } catch (err) { self.postMessage({ id, error: String(err && err.stack || err) }); }
+      };`,
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const w = new Worker(url);
+    URL.revokeObjectURL(url);
+    return w;
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- 紙張材質（含紙紋細節法線注入） ---------- */
@@ -2944,7 +2995,8 @@ function applySurface(mat, s, o) {
   mat.transparent = o.opacity < 1;
   mat.opacity = o.opacity;
   mat.depthWrite = o.opacity >= 1;
-  mat.sheen = o.sheen; mat.sheenRoughness = 0.85; mat.sheenColor.set(0xffffff); // 觸感膜只要極淡的絨光，太強會像塑膠
+  // 絨光（sheen）從 0 變成非 0 會讓材質重新編譯著色器（換上膜時卡一下），所以最小保留一個看不出來的值
+  mat.sheen = Math.max(o.sheen, 1e-4); mat.sheenRoughness = 0.85; mat.sheenColor.set(0xffffff); // 觸感膜只要極淡的絨光，太強會像塑膠
   mat.userData.u.detailMap.value = o.detailTex;
   mat.userData.u.detailRepeat.value.set(o.repeatX, o.repeatY);
   mat.userData.u.detailStrength.value = o.detailStrength;
@@ -2952,7 +3004,7 @@ function applySurface(mat, s, o) {
   mat.needsUpdate = true;
 }
 
-return { clamp, PAPERS, LAMINATIONS, FOILS, FINISHES, TILE_MM, getDetail, hexToRgb, rasterize, readPixels, coverage, coverageFromArt, mirrorX, blur, reliefHeight, composeSide, createPaperMaterial, applySurface };
+return { clamp, PAPERS, LAMINATIONS, FOILS, FINISHES, TILE_MM, getDetail, hexToRgb, rasterize, readPixels, coverage, coverageFromArt, mirrorX, blur, reliefHeight, composeSideData, surfaceFromData, composeBoth, createTextureWorker, createPaperMaterial, applySurface };
 })();
 
 const __sample = (() => {
@@ -3510,7 +3562,7 @@ return { loadModel };
 
 
 const { PRODUCTS, getProduct, makePanel, BLEED, GSM_OPTIONS, digipakNeeds, bookletOpens, bookletLeaves } = __products;
-const { PAPERS, LAMINATIONS, FOILS, FINISHES, TILE_MM, clamp, getDetail, hexToRgb, rasterize, readPixels, coverage, coverageFromArt, mirrorX, reliefHeight, composeSide, createPaperMaterial, applySurface } = __textures;
+const { PAPERS, LAMINATIONS, FOILS, FINISHES, TILE_MM, clamp, getDetail, hexToRgb, rasterize, readPixels, coverage, coverageFromArt, mirrorX, composeBoth, surfaceFromData, createTextureWorker, createPaperMaterial, applySurface } = __textures;
 const { sampleCanvas, discCanvas, spreadCanvas } = __sample;
 const { drawDieline, dielineSVG } = __dieline;
 const { loadModel } = __model;
@@ -3996,6 +4048,8 @@ function rebuildGeometry(frame, recenter = frame) {
     d: dims(), t, open: state.open, discOut: state.disc, bkOpen: state.bkOpen, bkFan: state.bkFan, pageArt, labelTex, discTex, models,
     plainMat: mats.plain, pageMat: mats.page, paperMat: mats.paperPlain,
     layout, mats,
+    // 展開圖貼圖的寬度（px）：依即將產生的材質解析度計算，不讀目前的貼圖（換版面時暫時是 1 px 的素色紙）
+    texW: Math.max(2, Math.round(layout.W * ppmFor())),
     piece: (id) => layout.pieces.find((q) => q.id === id),
     mk: (id, tt = t, opts) => {
       const p = layout.pieces.find((q) => q.id === id);
@@ -4316,7 +4370,84 @@ function ppmFor() {
 const rasterCache = { key: '', map: new Map() };
 let imgSeq = 0;
 
-function regenTextures() {
+// 材質合成：主執行緒準備圖稿與遮罩（有快取），最重的起伏與貼圖合成交給背景執行緒，
+// 計算期間畫面仍可操作。連續變更時只套用最後一次的結果
+let texWorker = null, texWorkerTried = false;
+let texBusy = false, texAgain = false, texWaiters = [], texSeq = 0;
+const texPending = new Map();
+function textureWorker() {
+  if (!texWorkerTried) {
+    texWorkerTried = true;
+    texWorker = createTextureWorker();
+    if (texWorker) {
+      texWorker.onmessage = (e) => {
+        const cb = texPending.get(e.data.id);
+        texPending.delete(e.data.id);
+        if (!cb) return;
+        if (e.data.error) { console.warn('背景材質計算失敗，改在主執行緒計算', e.data.error); dropWorker(); cb(null, true); }
+        else cb(e.data.r);
+      };
+      // 瀏覽器不允許背景執行緒（例如內容安全政策）時改回主執行緒
+      texWorker.onerror = (e) => { e.preventDefault?.(); console.warn('背景執行緒無法使用，改在主執行緒計算材質'); const cbs = [...texPending.values()]; texPending.clear(); dropWorker(); for (const cb of cbs) cb(null, true); };
+    }
+  }
+  return texWorker;
+}
+function dropWorker() { try { texWorker?.terminate(); } catch { /* 忽略 */ } texWorker = null; }
+
+// 回傳 Promise：這次（或之後合併進來的）設定套用到材質後完成
+function regenTextures({ placeholder = false } = {}) {
+  if (placeholder) applyPlaceholder();
+  return new Promise((resolve, reject) => { texWaiters.push({ resolve, reject }); runTextures(); });
+}
+function runTextures() {
+  if (texBusy) { texAgain = true; return; } // 正在算：算完後直接用最新設定重算，舊結果丟掉
+  texBusy = true; texAgain = false;
+  const finish = (err) => {
+    texBusy = false;
+    if (texAgain && !err) { runTextures(); return; }
+    const ws = texWaiters; texWaiters = [];
+    for (const w of ws) err ? w.reject(err) : w.resolve();
+  };
+  let prep;
+  try { prep = prepareTextures(); } catch (e) { finish(e); return; }
+  const done = (r) => {
+    if (texAgain) { finish(); return; }
+    try {
+      prep.apply(r || composeBoth(prep.job));
+      finish();
+    } catch (e) { finish(e); }
+  };
+  const w = textureWorker();
+  if (!w) { done(null); return; }
+  const id = ++texSeq;
+  texPending.set(id, done);
+  w.postMessage({ id, job: prep.job });
+}
+
+// 版面改變（換品項、改尺寸）時，舊貼圖的座標已經對不上：先換成素色紙，等新貼圖算好
+function applyPlaceholder() {
+  const pap = paper(), lam = lamination();
+  const [r, g, b] = hexToRgb(state.paperColor || pap.color).map((v) => Math.round(v * 255));
+  for (const mat of [mats.out, mats.in]) {
+    const px = (a) => new Uint8Array(a);
+    const d = {
+      w: 1, h: 1,
+      cU: px([r, g, b, 255]),
+      ormU: px([255, Math.round((lam.rough ?? pap.rough) * 255), Math.round((pap.metal || 0) * 255), 255]),
+      nU: px([128, 128, 255, 255]),
+      coatU: px([Math.round((lam.coat ?? pap.coat ?? 0) * 255), Math.round((lam.coatRough ?? 0.12) * 255), 0, 255]),
+      // 保留珠光／鏤空貼圖的有無，材質不必重新編譯
+      iridU: mat.iridescenceMap ? px([0, 0, 0, 255]) : null,
+      alphaU: mat.alphaMap ? px([255, 255, 255, 255]) : null,
+      P: new Uint8ClampedArray([r, g, b, 255]),
+    };
+    applySurface(mat, surfaceFromData(d), { opacity: pap.opacity ?? 1, sheen: lam.sheen || 0, detailTex: getDetail(pap.detail).tex, repeatX: layout.W / TILE_MM, repeatY: layout.H / TILE_MM, detailStrength: pap.detailStrength });
+  }
+  invalidate();
+}
+
+function prepareTextures() {
   const pap = paper(), lam = lamination();
   const ppm = ppmFor();
   const w = Math.max(2, Math.round(layout.W * ppm)), h = Math.max(2, Math.round(layout.H * ppm));
@@ -4381,14 +4512,17 @@ function regenTextures() {
     bySide[L.side].push({ type: L.type, params: L.params, mask: m, id: L.id });
   }
 
-  const relief = { out: reliefHeight(bySide.out, w, h, ppm), in: reliefHeight(bySide.in, w, h, ppm) };
-  const through = (E) => { if (!E) return null; const r = mirrorX(E, w, h); for (let i = 0; i < r.length; i++) r[i] *= -0.8; return r; };
-  const paperRGB = hexToRgb(state.paperColor || pap.color);
-  const common = { w, h, ppm, paper: pap, paperRGB, lam };
-
-  const sOut = composeSide({ ...common, art: artData.out, layers: bySide.out, relief: relief.out, through: through(relief.in), cut });
-  const sIn = composeSide({ ...common, art: artData.in, layers: bySide.in, relief: relief.in, through: through(relief.out), cut: cut && mirrorX(cut, w, h) });
   const det = getDetail(pap.detail);
+  const side = (k) => ({ art: artData[k] ? artData[k].data : null, layers: bySide[k].map((L) => ({ type: L.type, params: L.params, mask: L.mask })) });
+  const job = { w, h, ppm, paper: pap, lam, paperRGB: hexToRgb(state.paperColor || pap.color), tint: det.tint, out: side('out'), in: side('in'), cut };
+  return { job, apply: (r) => applyTextures(r, bySide, w, h) };
+}
+
+// 背景（或主執行緒）算好的結果套用到材質
+function applyTextures(r, bySide, w, h) {
+  const pap = paper(), lam = lamination();
+  const det = getDetail(pap.detail);
+  const sOut = surfaceFromData(r.out), sIn = surfaceFromData(r.in);
   const o = {
     opacity: pap.opacity ?? 1,
     sheen: lam.sheen || 0,
@@ -4403,7 +4537,7 @@ function regenTextures() {
   const pp = mats.paperPlain;
   pp.color.set(state.paperColor || pap.color);
   pp.roughness = lam.rough ?? pap.rough;
-  pp.sheen = o.sheen;
+  pp.sheen = Math.max(o.sheen, 1e-4); // 同 applySurface：避免換上膜時重新編譯
   pp.userData.u.detailMap.value = o.detailTex;
   pp.userData.u.detailRepeat.value.set(o.repeatX, o.repeatY);
   pp.userData.u.detailStrength.value = o.detailStrength * (lam.detailMul ?? 1);
@@ -4416,20 +4550,21 @@ function regenTextures() {
   overlayCache = null;
   previewCache = null;
   if (state.view === 'die') drawDie();
+  invalidate();
 }
 
 let texTimer = 0;
+// 顯示「產生材質中」直到材質套用完成（期間畫面照常可以操作）
+function texturesUI(opts) {
+  $('#busy').hidden = false;
+  return regenTextures(opts)
+    .catch((e) => { console.error(e); alertInline('材質產生失敗：' + e.message); })
+    .finally(() => { if (!texBusy) $('#busy').hidden = true; invalidate(); });
+}
 function scheduleTextures(delay = 40) {
   clearTimeout(texTimer);
-  const busy = $('#busy');
-  busy.hidden = false;
-  texTimer = setTimeout(() => {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      try { regenTextures(); } catch (e) { console.error(e); alertInline('材質產生失敗：' + e.message); }
-      busy.hidden = true;
-      invalidate();
-    }));
-  }, delay);
+  $('#busy').hidden = false;
+  texTimer = setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => texturesUI())), delay);
 }
 
 function rebuildLayout(frame) {
@@ -4438,7 +4573,8 @@ function rebuildLayout(frame) {
   renderUploads(); // 上傳欄位、建議尺寸與遮罩的部件選項都依版面而定
   if (state.view === 'photo') renderPhotoComps();
   renderLayers();
-  regenTextures();
+  clearTimeout(texTimer);
+  texturesUI({ placeholder: true });
   rebuildGeometry(frame, true);
 }
 
@@ -5492,12 +5628,17 @@ async function init() {
   selectProduct(state.product);
   updateRail();
   requestAnimationFrame(loop);
+  // 閒置時預先產生各紙材的紙紋（每種第一次用到時要畫上千條纖維），之後第一次切換紙材也不會停頓
+  const idle = window.requestIdleCallback || ((f) => setTimeout(() => f({ timeRemaining: () => 50 }), 200));
+  const kinds = [...new Set([...PAPERS.map((p) => p.detail), ...Object.values(TABLES).map((t) => t.detail).filter(Boolean)])];
+  const warm = () => { const k = kinds.shift(); if (!k) return; getDetail(k); idle(warm, { timeout: 4000 }); };
+  setTimeout(() => idle(warm, { timeout: 4000 }), 3000);
   // 攝影棚 HDRI 在第一個畫面出來後才解碼，先用內建柔光箱顯示
   setTimeout(() => loadHDRI().then(applyEnv).catch((e) => console.warn('HDRI 載入失敗，改用內建柔光箱', e)), 50);
 }
 
 // 方便在瀏覽器主控台操作或自動化截圖
-window.proofroom = { THREE, state, scene, camera, renderer, controls, bounds, key, surfaces: () => surfaces, masks: () => lastMasks, setView: (v) => setView(v, true), selectProduct, regen: regenTextures };
+window.proofroom = { THREE, state, scene, camera, renderer, controls, bounds, key, surfaces: () => surfaces, masks: () => lastMasks, setView: (v) => setView(v, true), selectProduct, regen: regenTextures, texWorker: () => !!texWorker };
 
 init();
 
