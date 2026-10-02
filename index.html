@@ -151,7 +151,7 @@ details.adv > .adv-body { display: grid; gap: 10px; margin-top: 12px; }
 .cur-product b { font-size: 15px; font-weight: 500; }
 .cur-product em { font-style: normal; font-size: 11.5px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 8px; }
 /* 品項類別：滿寬的兩段膠囊切換 */
-.seg.cat { display: grid; grid-template-columns: 1fr 1fr; }
+.seg.cat { display: grid; grid-template-columns: repeat(3, 1fr); }
 .seg.cat button { padding: 6px 12px; font-size: 13px; }
 .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .chip { text-align: left; border: 1px solid var(--line-2); background: transparent; border-radius: var(--r-card); padding: 9px 11px; display: grid; gap: 2px; transition: background 0.12s, border-color 0.12s; }
@@ -493,10 +493,11 @@ input[type="range"]:hover { border-color: var(--ink-2); }
       <h2><span class="n">01 / PRODUCT</span>品項與尺寸</h2>
       <p class="lead">先選類別與品項，再調整尺寸與結構選項。紙張磅數會影響厚度與折線的圓弧。</p>
       <div class="seg cat" id="prod-cat" role="tablist" aria-label="品項類別">
-        <button data-g="print" role="tab">一般印刷</button><button data-g="album" role="tab">專輯包裝</button>
+        <button data-g="print" role="tab">一般印刷</button><button data-g="album" role="tab">專輯包裝</button><button data-g="box" role="tab">紙盒包裝</button>
       </div>
       <div class="chips" id="products-print"></div>
       <div class="chips" id="products-album"></div>
+      <div class="chips" id="products-box"></div>
       <div class="cur-product" id="cur-product" aria-live="polite"></div>
       <div class="row" id="preset-row">
         <label for="preset">常用尺寸</label>
@@ -505,6 +506,7 @@ input[type="range"]:hover { border-color: var(--ink-2); }
       <div class="dims" id="dims">
         <label class="num" data-f="w"><span>寬</span><input id="dim-w" type="number" min="20" max="1200" step="0.5"><em>mm</em></label>
         <label class="num" data-f="h"><span>高</span><input id="dim-h" type="number" min="20" max="1200" step="0.5"><em>mm</em></label>
+        <label class="num" data-f="d"><span>深</span><input id="dim-d" type="number" min="5" max="600" step="0.5"><em>mm</em></label>
         <label class="num" data-f="s"><span>書背</span><input id="dim-s" type="number" min="0" max="30" step="0.5"><em>mm</em></label>
         <label class="num" data-f="r"><span>圓角</span><input id="dim-r" type="number" min="0" max="30" step="0.5"><em>mm</em></label>
       </div>
@@ -670,6 +672,15 @@ function roundedRectShape(w, h, r) {
   return s;
 }
 
+// 由外側看的外形點（以片中心為原點、y 朝上）建立 Shape；sx = -1 時左右鏡像
+function polyShape(pts, sx) {
+  const s = new THREE.Shape();
+  const q = sx > 0 ? pts : pts.map(([x, y]) => [-x, y]).reverse();
+  q.forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y)));
+  s.closePath();
+  return s;
+}
+
 function faceGeometry(shape, w, h, uv) {
   const g = new THREE.ShapeGeometry(shape, 10);
   const pos = g.attributes.position;
@@ -695,23 +706,36 @@ function makePanel(piece, layout, t, mats, radius = 0, opts = {}) {
   const { y, h } = piece;
   // 所有切邊稍微倒圓角（紙越薄倒角越小）
   const bs = Math.max(0, Math.min(0.35, t * 0.4, w / 4, h / 4));
-  const shape = roundedRectShape(w, h, radius);
+  const shape = opts.poly ? polyShape(opts.poly, 1) : roundedRectShape(w, h, radius);
+  // 外側面翻轉 180° 後才朝外，所以不規則外形的內側面與紙邊要用左右鏡像的外形，三者才會重合
+  const shapeIn = opts.poly ? polyShape(opts.poly, -1) : shape;
   // 印刷面保持完整尺寸蓋住倒角，倒角只出現在紙板側邊，不會在印刷面周圍露出白邊
   const vOut = { u0: x / W, uw: w / W, v0: 1 - (y + h) / H, vh: h / H };
   const vIn = { u0: (W - x - w) / W, uw: w / W, v0: vOut.v0, vh: vOut.vh };
   const g = new THREE.Group();
-  const fIn = new THREE.Mesh(faceGeometry(shape, w, h, vIn), mats.in);
+  const fIn = new THREE.Mesh(faceGeometry(shapeIn, w, h, vIn), mats.in);
   // 印刷面比倒角頂端略高 0.004 mm，避免與倒角同一平面互相閃爍而出現白色虛線
   fIn.position.z = t / 2 + 0.004;
   const fOut = new THREE.Mesh(faceGeometry(shape, w, h, vOut), mats.out);
   fOut.rotation.y = Math.PI;
   fOut.position.z = -t / 2 - 0.004;
   const edge = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(shape, bs > 0
+    new THREE.ExtrudeGeometry(shapeIn, bs > 0
       ? { depth: t - 2 * bs, bevelEnabled: true, bevelThickness: bs, bevelSize: bs, bevelOffset: -bs, bevelSegments: 3, curveSegments: 8 }
       : { depth: t, bevelEnabled: false, curveSegments: 8 }),
-    [hiddenMat, mats.edge]
+    [hiddenMat, opts.printedEdge ? mats.out : mats.edge]
   );
+  // 紙盒的折角：實際上印刷面是繞過折線連續的，切邊不會露白。
+  // 紙邊改用外側材質，取樣該片外緣往內約 2 px 的顏色（與印刷面同一套 UV 對應）
+  if (opts.printedEdge) {
+    const pos = edge.geometry.attributes.position, uv = edge.geometry.attributes.uv;
+    const eu = Math.min(vOut.uw * 0.25, 2 / 2048), ev = Math.min(vOut.vh * 0.25, 2 / 2048);
+    for (let i = 0; i < pos.count; i++) {
+      // 紙邊用的是左右鏡像的外形（與內側面相同），換回外側印刷面的座標
+      const u = vOut.u0 + (-pos.getX(i) / w + 0.5) * vOut.uw, v = vOut.v0 + (pos.getY(i) / h + 0.5) * vOut.vh;
+      uv.setXY(i, Math.min(Math.max(u, vOut.u0 + eu), vOut.u0 + vOut.uw - eu), Math.min(Math.max(v, vOut.v0 + ev), vOut.v0 + vOut.vh - ev));
+    }
+  }
   edge.position.z = -t / 2 + bs;
   // 裁切後網格仍以自身為中心；呼叫端加上 trimShift 即可放回原本片的位置（展開圖右邊 = 本地 -x）
   g.userData.trimShift = (tr - tl) / 2;
@@ -990,6 +1014,52 @@ function ringGeo(r0, r1) {
   return g;
 }
 
+// 光碟中央透明區的環形面：UV 以 Ø36 mm 對應整張貼圖（中央紋路用的細緻法線貼圖）
+const HUB_R = 18;
+function hubRingGeo(r0, r1) {
+  const g = new THREE.RingGeometry(r0, r1, 128, 1);
+  const pos = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / (2 * HUB_R) + 0.5, pos.getY(i) / (2 * HUB_R) + 0.5);
+  return g;
+}
+
+// 中央透明塑膠的射出紋路（參考實際光碟）：中孔邊緣倒角、靠近中孔的一圈凸環、
+// 整圈細密的同心圓車紋（深淺不一），以及金屬環內側的一道小段差。只用法線表現，不改幾何
+function hubTexture() {
+  if (matCache.hubTex) return matCache.hubTex;
+  const N = 1024, mm = (2 * HUB_R) / N;
+  // 先沿半徑算出高度（mm），再由斜率得到法線
+  const R = 4096, dr = HUB_R / R, hgt = new Float32Array(R);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const amp = new Float32Array(R);
+  for (let i = 0, a = 0.5; i < R; i++) { if (i % 24 === 0) a = 0.35 + rnd() * 0.65; amp[i] = a; }
+  const bump = (r, c, w, hgtv) => hgtv * Math.exp(-(((r - c) / w) ** 2));
+  for (let i = 0; i < R; i++) {
+    const r = i * dr;
+    let h = 0;
+    h += Math.max(0, 7.9 - r) * 0.25;            // 中孔倒角
+    h += bump(r, 8.7, 0.18, 0.05);                // 凸環
+    h += r > 10.25 && r < 10.6 ? -0.01 : 0;       // 金屬環內側的小段差
+    h += 0.0035 * amp[i] * Math.sin((2 * Math.PI * r) / 0.11); // 細密車紋
+    hgt[i] = h;
+  }
+  const data = new Uint8Array(N * N * 4);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const px = (x + 0.5) * mm - HUB_R, py = (y + 0.5) * mm - HUB_R, r = Math.hypot(px, py) || 1e-6;
+    const i = Math.min(R - 2, Math.floor(r / dr));
+    const slope = (hgt[i + 1] - hgt[Math.max(0, i - 1)]) / (2 * dr) * 3;
+    const nx = -slope * px / r, ny = -slope * py / r, l = Math.hypot(nx, ny, 1);
+    const j = (y * N + x) * 4;
+    data[j] = (nx / l * 0.5 + 0.5) * 255; data[j + 1] = (ny / l * 0.5 + 0.5) * 255; data[j + 2] = (1 / l * 0.5 + 0.5) * 255; data[j + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, N, N);
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return (matCache.hubTex = t);
+}
+
 // CD 結構（由內到外）：中孔 Ø15 → 印刷面透明圈至 Ø23 → 印刷區 Ø23–116 → 外緣 Ø116–120（銀色反光 + 透明邊）
 // 讀取面（背面）：透明圈至 Ø34.6（含堆疊環）→ 反射層
 // tex = { map, orm }：印刷色與金屬度／粗糙度（銀底時未印刷處為金屬）
@@ -1021,6 +1091,12 @@ function makeCD(tex) {
       anisotropy: 0.6, anisotropyMap: tangentialAnisoTexture(),
     });
     dimGlint(matCache.cdMirror);
+    // 印刷區內緣的金屬環（反射層露出的部分）：略帶霧面的鋁
+    matCache.cdHubMetal = new THREE.MeshPhysicalMaterial({
+      color: 0xd6d8dc, metalness: 1, roughness: 0.24,
+      anisotropy: 0.5, anisotropyMap: tangentialAnisoTexture(),
+    });
+    dimGlint(matCache.cdHubMetal);
   }
   if (!tex.material) {
     tex.material = new THREE.MeshPhysicalMaterial({
@@ -1034,10 +1110,19 @@ function makeCD(tex) {
   add(new THREE.Mesh(ringGeo(11.5, 58), tex.material), th / 2);
   add(new THREE.Mesh(ringGeo(58, 59.5), matCache.cdMirror), th / 2);
   add(new THREE.Mesh(ringGeo(17.3, 59.5), matCache.cdData), -th / 2, true);
-  // 透明部分：印刷面中央圈（至 Ø23）、讀取面中央圈（至 Ø34.6）、外緣
-  for (const [r0, r1, z, flip] of [[7.5, 11.5, th / 2, false], [7.5, 17.3, -th / 2, true], [59.5, 60, th / 2, false], [59.5, 60, -th / 2, true]]) {
+  // 印刷區內緣露出一圈約 0.9 mm 的金屬環（Ø21.2–23）
+  add(new THREE.Mesh(ringGeo(10.6, 11.5), matCache.cdHubMetal), th / 2 + 0.002);
+  // 透明部分：印刷面中央圈（Ø15–21.2）、讀取面中央圈（至 Ø34.6）有射出紋路；外緣
+  for (const [r0, r1, z, flip] of [[7.5, 10.6, th / 2, false], [7.5, 17.3, -th / 2, true]]) {
+    add(plastic(hubRingGeo(r0, r1), 'clear', 'hub'), z, flip);
+  }
+  for (const [r0, r1, z, flip] of [[59.5, 60, th / 2, false], [59.5, 60, -th / 2, true]]) {
     add(plastic(ringGeo(r0, r1), 'clear'), z, flip);
   }
+  // 中孔內壁
+  const hole = plastic(new THREE.CylinderGeometry(7.5, 7.5, th, 96, 1, true), 'clear');
+  hole.rotation.x = Math.PI / 2;
+  g.add(hole);
   // 堆疊環在讀取面（印刷面從 Ø23 開始，已涵蓋堆疊環的位置）
   const stack = plastic(new THREE.TorusGeometry(16.6, 0.3, 8, 96), 'clear');
   stack.position.z = -th / 2;
@@ -1058,13 +1143,15 @@ function plasticMat(kind) {
   let m;
   if (kind === 'clearTint') {
     m = new THREE.MeshStandardMaterial({ color: 0xd6e4df, roughness: 0.1, transparent: true, opacity: 0.045, depthWrite: false });
-  } else if (kind === 'clearRefl' || kind === 'clearReflRib') {
+  } else if (kind === 'clearRefl' || kind === 'clearReflRib' || kind === 'clearReflHub' || kind === 'clearReflWall') {
     m = new THREE.MeshPhysicalMaterial({
       color: 0x000000, roughness: 0.14, specularIntensity: 0.7,
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     });
-    addPlasticLook(m, 0.08, 0.55);
+    // 托盤立壁：邊緣亮線加強，讓塑膠厚度看得出來
+    addPlasticLook(m, kind === 'clearReflWall' ? 0.16 : 0.08, kind === 'clearReflWall' ? 1.3 : 0.55);
     if (kind === 'clearReflRib') { m.normalMap = ribTexture(); m.normalScale.set(2.6, 2.6); }
+    if (kind === 'clearReflHub') { m.normalMap = hubTexture(); m.roughness = 0.2; }
   } else if (kind === 'glass') {
     // 外殼用真正的穿透材質：有折射、厚度吸收（越厚越青綠）
     m = new THREE.MeshPhysicalMaterial({
@@ -1167,7 +1254,7 @@ function plastic(geo, kind, rib = false) {
   }
   const g = new THREE.Group();
   const tint = new THREE.Mesh(geo, plasticMat('clearTint'));
-  const refl = new THREE.Mesh(geo, plasticMat(rib ? 'clearReflRib' : 'clearRefl'));
+  const refl = new THREE.Mesh(geo, plasticMat(rib === 'hub' ? 'clearReflHub' : rib === 'wall' ? 'clearReflWall' : rib ? 'clearReflRib' : 'clearRefl'));
   tint.renderOrder = 2; refl.renderOrder = 3;
   g.add(tint, refl);
   return g;
@@ -1177,15 +1264,17 @@ const rbox = (w, h, d, r = 0.5) => new RoundedBoxGeometry(w, h, d, 3, Math.min(r
 
 // 光碟凹槽的外形：120.6 mm 圓 + 左右兩個取碟指扣，並裁在托盤範圍內
 // 光碟凹槽：120.6 mm 圓 + 圓周上的取碟圓弧缺口（lobes：角度（度）清單）
-// 取碟缺口在托盤四個角的方向（45°、135°…），半徑 12 mm 的半圓，圓心落在光碟槽圓周上
-const LOBES = [45, 135, 225, 315], LOBE_R = 12, RECESS_R = 60.6;
-function recessPath(w, h, lobes = LOBES) {
-  const path = new THREE.Path();
-  const R = RECESS_R, notchC = RECESS_R, notchR = LOBE_R;
-  const maxX = w / 2 - 1.2, maxY = h / 2 - 0.9;
-  const N = 360;
+// 取碟缺口在托盤四個角的方向（45°、135°…），直徑 30 mm（半徑 15 mm）的半圓，圓心落在光碟槽圓周上
+const LOBES = [45, 135, 225, 315], LOBE_R = 15, RECESS_R = 60.6;
+function recessPoints(w, h, lobes = LOBES, grow = 0) {
+  const R = RECESS_R + grow, notchC = RECESS_R, notchR = LOBE_R + grow;
+  // 光碟槽碰到托盤上下緣時被裁平：槽距外緣 1.5 mm，立壁外側（grow）最多長到外框內面，
+  // 兩者之間保留 0.6 mm 的壁，外形才不會重疊成零寬度
+  const lim = 1.5 - Math.min(grow, 0.6);
+  const maxX = w / 2 - lim, maxY = h / 2 - lim;
+  const N = 360, pts = [];
   const centers = lobes.map((d) => [Math.cos((d * Math.PI) / 180) * notchC, Math.sin((d * Math.PI) / 180) * notchC]);
-  for (let i = 0; i <= N; i++) {
+  for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2;
     const cx = Math.cos(a), cy = Math.sin(a);
     let r = R;
@@ -1195,10 +1284,12 @@ function recessPath(w, h, lobes = LOBES) {
     }
     if (Math.abs(cx) > 1e-6) r = Math.min(r, maxX / Math.abs(cx));
     if (Math.abs(cy) > 1e-6) r = Math.min(r, maxY / Math.abs(cy));
-    const x = cx * r, y = -cy * r; // 順時針繞行，作為洞
-    if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
+    pts.push(new THREE.Vector2(cx * r, cy * r));
   }
-  return path;
+  return pts;
+}
+function recessPath(w, h, lobes = LOBES, grow = 0) {
+  return new THREE.Path(recessPoints(w, h, lobes, grow).reverse()); // 順時針，作為洞
 }
 
 // 取碟缺口的弧形凹槽：從光碟槽底部以碗狀曲面往外升到平台頂面（不是垂直挖空）
@@ -1211,7 +1302,9 @@ function lobeBowl(deg, zFloor, zTop) {
   const pos = [], idx = [];
   const zAt = (x, y) => {
     const d = Math.min(1, Math.hypot(x - cx, y - cy) / r);
-    return zFloor + (zTop - zFloor) * (1 - Math.sqrt(1 - d * d)); // 球面碗
+    // 平底圓杯：中央約 6 成直徑是平的槽底，外圈斜面升到平台頂面
+    const u = Math.max(0, (d - 0.62) / 0.38);
+    return zFloor + (zTop - zFloor) * u * u * (3 - 2 * u);
   };
   for (let i = 0; i <= N; i++) {
     const phi = a - span + (2 * span * i) / N;
@@ -1246,41 +1339,95 @@ function lobeBowl(deg, zFloor, zTop) {
   return g;
 }
 
-// Digipak 托盤（參考市售透明托盤）：薄底板 + 凸起的平台，平台挖出光碟凹槽，
-// 凹槽周圍有四個圓弧取碟缺口；中央是承碟環與卡榫花瓣。回傳 {group, discZ, height}
+// Digipak 托盤（參考實際透明托盤）：約 0.9 mm 的薄塑膠片吸塑成形 —
+// 平台頂面、光碟槽與取碟圓杯的立壁、外框立壁都是薄壁，所以邊緣會看到兩道亮線（壁的內外兩面）。
+// 中央：承碟圓台 + 三支帶彈片的卡臂（120° 間隔）+ 中間的 PUSH 按鈕。回傳 {group, discZ, height}
 function makeTray(w, h, kind) {
   if (kind === 'clear') kind = 'glass';
   const g = new THREE.Group();
-  const H = 5.2, floor = 0.9;
-  const shape = roundedRectShape(w, h, 2.5);
-  shape.holes.push(recessPath(w, h));
-  const frameGeo = new THREE.ExtrudeGeometry(shape, { depth: H - floor, bevelEnabled: true, bevelThickness: 0.3, bevelSize: 0.3, bevelSegments: 2, curveSegments: 12 });
-  const frame = plastic(frameGeo, kind);
-  frame.position.z = floor;
-  g.add(frame);
-  const base = plastic(new THREE.ExtrudeGeometry(roundedRectShape(w, h, 2.5), { depth: floor, bevelEnabled: false }), kind);
-  g.add(base);
-  // 四個弧形取碟凹槽
+  const H = 5.2, T = 0.9, floor = 0.9;
+  // 立壁在斜看時會折射到托盤後方的深色背景，出現鋸齒狀暗紋；透明托盤的立壁改用不折射的透明塑膠（反射殼 + 淡底色），邊緣亮線也更明顯
+  const wallKind = kind === 'glass' ? 'clear' : kind;
+  const ext = (shape, depth, z, bevel = 0.2, mk = kind) => {
+    const m = plastic(new THREE.ExtrudeGeometry(shape, bevel > 0
+      ? { depth: depth - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelOffset: -bevel, bevelSegments: 2, curveSegments: 12 }
+      : { depth, bevelEnabled: false, curveSegments: 12 }), mk, mk === 'clear' ? 'wall' : false);
+    m.position.z = z + bevel;
+    g.add(m);
+    return m;
+  };
+  // 平台頂面（挖掉光碟槽與立壁）
+  const top = roundedRectShape(w, h, 2.5);
+  top.holes.push(recessPath(w, h, LOBES, T));
+  ext(top, T, H - T);
+  // 外框立壁
+  const rim = roundedRectShape(w, h, 2.5);
+  rim.holes.push(roundedRectShape(w - 2 * T, h - 2 * T, 1.6));
+  ext(rim, H - T, 0, 0, wallKind);
+  // 光碟槽立壁（沿光碟槽與取碟缺口的外形）
+  const wall = new THREE.Shape(recessPoints(w, h, LOBES, T));
+  wall.holes.push(recessPath(w, h));
+  ext(wall, H - floor, floor, 0, wallKind);
+  // 光碟槽底
+  ext(new THREE.Shape(recessPoints(w, h)), floor, 0, 0);
+  // 四個平底取碟圓杯
   for (const deg of LOBES) {
-    const bowl = plastic(lobeBowl(deg, floor, H + 0.3), kind);
+    const bowl = plastic(lobeBowl(deg, floor, H), kind);
     bowl.traverse((o) => { if (o.isMesh && o.material.side !== THREE.DoubleSide) { o.material = o.material.clone(); o.material.side = THREE.DoubleSide; } });
     g.add(bowl);
   }
-  // 承碟環
-  const ledge = plastic(new THREE.CylinderGeometry(16.5, 16.5, 1.3, 64), kind);
-  ledge.rotation.x = Math.PI / 2; ledge.position.z = floor + 0.65;
-  g.add(ledge);
-  // 卡榫花瓣
-  const petals = 12;
-  for (let i = 0; i < petals; i++) {
-    const a = (i / petals) * Math.PI * 2;
-    const pgeo = rbox(1.1, 4.2, 2.9, 0.35);
-    const p = plastic(pgeo, kind);
-    p.position.set(Math.cos(a) * 5.6, Math.sin(a) * 5.6, floor + 1.3 + 1.45);
-    p.rotation.z = a - Math.PI / 2;
-    g.add(p);
+  // 承碟圓台：光碟中孔周圍略高於槽底的一圈平台（照片中細細的圓形輪廓）
+  const hubR = 18.5, hubH = 0.6;
+  ext(new THREE.Shape(new THREE.Path().absarc(0, 0, hubR, 0, Math.PI * 2).getPoints(96)), hubH, floor, 0.15);
+  const hubTop = floor + hubH;
+  // 三支卡臂：方框（外 9 × 10 mm、框寬 1 mm）＋框內往中心微微翹起的彈片
+  const armLen = 10, armW = 9, armH = 0.7, armR = 12.4;
+  const frame = new THREE.Shape();
+  frame.moveTo(-armW / 2, -armLen / 2); frame.lineTo(armW / 2, -armLen / 2); frame.lineTo(armW / 2, armLen / 2); frame.lineTo(-armW / 2, armLen / 2); frame.closePath();
+  const slot = new THREE.Path();
+  slot.moveTo(-armW / 2 + 1, -armLen / 2 + 1); slot.lineTo(-armW / 2 + 1, armLen / 2 - 1); slot.lineTo(armW / 2 - 1, armLen / 2 - 1); slot.lineTo(armW / 2 - 1, -armLen / 2 + 1); slot.closePath();
+  frame.holes.push(slot);
+  for (let i = 0; i < 3; i++) {
+    const a = Math.PI / 2 + (i * 2 * Math.PI) / 3;
+    const arm = new THREE.Group();
+    arm.rotation.z = a - Math.PI / 2;
+    const f = plastic(new THREE.ExtrudeGeometry(frame, { depth: armH, bevelEnabled: true, bevelThickness: 0.15, bevelSize: 0.15, bevelOffset: -0.15, bevelSegments: 1 }), kind);
+    f.position.set(0, armR, hubTop + 0.15);
+    arm.add(f);
+    // 彈片：根部接在框的外側，往中心延伸（略低於框頂，不碰到光碟）
+    const tabL = armLen - 2.6;
+    const tab = plastic(rbox(armW - 2.6, tabL, 0.5, 0.2), kind);
+    tab.position.set(0, armR + armLen / 2 - 1 - tabL / 2, hubTop + 0.4);
+    arm.add(tab);
+    // 卡鉤：在中孔內側（半徑 < 7.5 mm），勾住光碟中孔
+    const hook = plastic(rbox(3.6, 1.1, 2.6, 0.35), kind);
+    hook.position.set(0, 6.85, hubTop + 1.3);
+    arm.add(hook);
+    g.add(arm);
   }
-  return { group: g, discZ: floor + 1.3, height: H };
+  // 中央 PUSH 按鈕：外圈圓環 + 略低的圓頂
+  const btnR = 5.6, btnH = 3.4;
+  const prof = [[0, hubTop + btnH - 0.5], [btnR - 1.6, hubTop + btnH - 0.6], [btnR - 1.1, hubTop + btnH - 0.2], [btnR - 0.5, hubTop + btnH], [btnR, hubTop + btnH - 0.4], [btnR, hubTop], [btnR + 0.8, hubTop]];
+  const btn = plastic(new THREE.LatheGeometry(prof.map(([r, z]) => new THREE.Vector2(r, z)), 64), kind);
+  btn.rotation.x = Math.PI / 2;
+  g.add(btn);
+  // 按鈕上的 PUSH 字樣（透明塑膠上的淺浮雕，只用淡淡的亮字表現）
+  matCache.pushMat ||= (() => {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+    const x = c.getContext('2d');
+    x.font = '700 64px Montserrat, Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = 'rgba(255,255,255,0.9)'; x.fillText('PUSH', 128, 66);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.32, depthWrite: false });
+  })();
+  const push = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3.2), matCache.pushMat);
+  push.position.z = hubTop + btnH - 0.45;
+  push.material.userData.noShadow = true;
+  push.renderOrder = 4;
+  g.add(push);
+  // 薄壁在俯視時幾乎側對鏡頭，深度不準，闔上時會從封面透出白點；畫托盤時依斜率把深度往後推
+  g.traverse((o) => { if (o.isMesh && o !== push) pushBack(o); });
+  return { group: g, discZ: hubTop + armH + 0.3, height: H };
 }
 
 // 圓形泡綿：穿過光碟中孔固定
@@ -2182,6 +2329,162 @@ function digipakNeeds(d) {
   return Math.ceil((holder + bk + 1.2 + 2 * DIGIPAK_BOARD) * 2) / 2;
 }
 
+/* ---------- 紙盒：反插盒 ---------- */
+
+// 反插盒（Reverse Tuck End）展開：膠邊｜正面｜側面｜背面｜側面，上蓋接在背面上緣、下蓋接在正面下緣（上下插舌方向相反）。
+// d.w = 盒寬（正面）、d.d = 盒深（側面）、d.h = 盒高。y 朝下，單位 mm
+const boxParts = (d) => {
+  const L = d.w, W = d.d, H = d.h;
+  const T = Math.round(Math.min(Math.max(W * 0.5, 12), 24)); // 插舌深度
+  const D = Math.round(Math.min(W * 0.75, L * 0.45)); // 防塵翼長度（不超過盒寬一半，兩片才不會相撞）
+  const g = Math.round(Math.min(14, L * 0.3)); // 膠邊寬
+  return { L, W, H, T, D, g };
+};
+function rteLayout(d) {
+  const { L, W, H, T, D, g } = boxParts(d);
+  const xF = g, xS = g + L, xB = g + L + W, xS2 = g + 2 * L + W;
+  const yLid = T, yBody = T + W, yBot = T + W + H;
+  const blank = { inRole: 'blank' };
+  const piece = (id, role, name, x, y, w, h, poly) => ({ id, role, name, inName: `${name}（內側）`, x, y, w, h, ...blank, ...(poly ? { poly } : {}) });
+  // 插舌：兩角是圓弧，靠折線處兩側內縮 1 mm（插入時不卡紙）
+  const tuck = (x, y, up) => {
+    const r = Math.min(T * 0.7, L / 4), pts = [];
+    const yFold = up ? y + T : y, yFree = up ? y : y + T, sgn = up ? 1 : -1;
+    pts.push([x + 1, yFold]);
+    for (let i = 0; i <= 8; i++) { const a = (Math.PI / 2) * (i / 8); pts.push([x + r - r * Math.cos(a), yFree + sgn * (r - r * Math.sin(a))]); }
+    for (let i = 0; i <= 8; i++) { const a = (Math.PI / 2) * (i / 8); pts.push([x + L - r + r * Math.sin(a), yFree + sgn * (r - r * Math.cos(a))]); }
+    pts.push([x + L - 1, yFold]);
+    return up ? pts : pts.reverse();
+  };
+  // 防塵翼：靠折線處全寬，往外側斜收
+  const dust = (x, y, up) => {
+    const yFold = up ? y + D : y, yFree = up ? y : y + D;
+    const pts = [[x + 0.5, yFold], [x + W * 0.12, yFree], [x + W * 0.82, yFree], [x + W - 0.5, yFold - (up ? D * 0.25 : -D * 0.25)], [x + W - 0.5, yFold]];
+    return up ? pts : pts.reverse();
+  };
+  // 膠邊：上下斜角
+  const glue = [[g, yBody + 0.5], [0, yBody + g * 0.6], [0, yBot - g * 0.6], [g, yBot - 0.5]];
+  const pieces = [
+    piece('glue', 'blank', '膠邊', 0, yBody, g, H, glue),
+    piece('front', 'front', '正面', xF, yBody, L, H),
+    piece('side', 'spine', '側面', xS, yBody, W, H),
+    piece('back', 'back', '背面', xB, yBody, L, H),
+    piece('side2', 'spine', '側面', xS2, yBody, W, H),
+    piece('lidTop', 'fill', '上蓋', xB, yLid, L, W),
+    piece('tuckTop', 'fill', '上插舌', xB, 0, L, T, tuck(xB, 0, true)),
+    piece('dustT1', 'fill', '防塵翼', xS, yLid + W - D, W, D, dust(xS, yLid + W - D, true)),
+    piece('dustT2', 'fill', '防塵翼', xS2, yLid + W - D, W, D, dust(xS2, yLid + W - D, true)),
+    piece('lidBot', 'fill', '下蓋', xF, yBot, L, W),
+    piece('tuckBot', 'fill', '下插舌', xF, yBot + W, L, T, tuck(xF, yBot + W, false)),
+    piece('dustB1', 'fill', '防塵翼', xS, yBot, W, D, dust(xS, yBot, false)),
+    piece('dustB2', 'fill', '防塵翼', xS2, yBot, W, D, dust(xS2, yBot, false)),
+  ];
+  const v = (x) => ({ x1: x, y1: yBody, x2: x, y2: yBot });
+  const hz = (x, w, y) => ({ x1: x, y1: y, x2: x + w, y2: y });
+  const folds = [v(xF), v(xS), v(xB), v(xS2),
+    hz(xB, L, yBody), hz(xB, L, yLid), hz(xS, W, yBody), hz(xS2, W, yBody),
+    hz(xF, L, yBot), hz(xF, L, yBot + W), hz(xS, W, yBot), hz(xS2, W, yBot)];
+  return { W: g + 2 * L + 2 * W, H: 2 * T + 2 * W + H, pieces, folds };
+}
+
+// 片的外形點：展開圖座標（y 朝下）→ 以片中心為原點、y 朝上（makePanel 的 opts.poly）
+const localPoly = (p) => p.poly && p.poly.map(([x, y]) => [x - p.x - p.w / 2, p.y + p.h / 2 - y]);
+
+// 把一片放到盒子上：r = 由外側看的「右」、u = 「上」、n = 朝外的法線；外側表面落在 c 所在的平面
+function placePanel(obj, c, r, u, n, t) {
+  const m = new THREE.Matrix4().makeBasis(r.clone().negate(), u, n.clone().negate());
+  obj.quaternion.setFromRotationMatrix(m);
+  obj.position.copy(c).addScaledVector(n, -t / 2);
+}
+// 沿某片的上緣（edge = 1）或下緣（-1）往內折 phi（0 = 攤平延伸，π/2 = 折 90° 進盒內）後，子片的方向
+function foldFrame(f, edge, phi) {
+  const out = f.u.clone().multiplyScalar(edge); // 子片往外延伸的方向（攤平時）
+  const dir = out.clone().multiplyScalar(Math.cos(phi)).addScaledVector(f.n, -Math.sin(phi));
+  const u = edge > 0 ? dir.clone() : dir.clone().negate();
+  return { r: f.r.clone(), u, n: new THREE.Vector3().crossVectors(f.r, u), dir };
+}
+
+// 盒內的防塵翼、插舌、膠邊幾乎側對鏡頭時，內側面的深度不準，會從外板印刷面透出白色虛線。
+// 只在畫這幾片時依斜率把深度往後推（共用的內側材質不能整體加：平放攤開的卡片內側會被推到桌面接觸陰影後面）
+function pushBack(mesh) {
+  let prev;
+  mesh.onBeforeRender = (r, s, c, g, m) => {
+    prev = [m.polygonOffset, m.polygonOffsetFactor, m.polygonOffsetUnits];
+    m.polygonOffset = true; m.polygonOffsetFactor = Math.max(2, prev[1]); m.polygonOffsetUnits = Math.max(2, prev[2]);
+  };
+  mesh.onAfterRender = (r, s, c, g, m) => { [m.polygonOffset, m.polygonOffsetFactor, m.polygonOffsetUnits] = prev; };
+}
+
+function buildRTE(k) {
+  const { d, t } = k;
+  const { L, W, H, T, D } = boxParts(d);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const g = new THREE.Group();
+  // 共平面的紙邊會閃出白線：正背面寬度各縮 0.12 mm 藏到側面後方；側面上下各縮一個紙厚，由上下蓋蓋住側面紙邊
+  const add = (id, c, f, inset = 0, shrink = 0) => {
+    const p = k.piece(id);
+    let poly = localPoly(p);
+    if (shrink && !poly) poly = localPoly({ ...p, poly: [[p.x, p.y], [p.x + p.w, p.y], [p.x + p.w, p.y + p.h], [p.x, p.y + p.h]] });
+    if (shrink) {
+      const [dx, dy] = Array.isArray(shrink) ? shrink : [shrink, 0];
+      const sx = (p.w / 2 - dx) / (p.w / 2), sy = (p.h / 2 - dy) / (p.h / 2);
+      poly = poly.map(([x, y]) => [x * sx, y * sy]);
+    }
+    const o = k.mk(id, t, { poly, printedEdge: true }).obj;
+    if (/^(dust|tuck|glue)/.test(id)) o.traverse((m) => { if (m.isMesh && m.material === k.mats.in) pushBack(m); });
+    placePanel(o, c.clone().addScaledVector(f.n, -inset), f.r, f.u, f.n, t);
+    g.add(o);
+    return o;
+  };
+  // 盒身平放：背面貼桌面（z = 0）、正面朝上（z = W）；盒高沿 y、盒寬沿 x
+  const F = { r: V(1, 0, 0), u: V(0, 1, 0), n: V(0, 0, 1) };
+  const S = { r: V(0, 0, -1), u: V(0, 1, 0), n: V(1, 0, 0) };
+  const B = { r: V(-1, 0, 0), u: V(0, 1, 0), n: V(0, 0, -1) };
+  const S2 = { r: V(0, 0, 1), u: V(0, 1, 0), n: V(-1, 0, 0) };
+  add('front', V(0, 0, W), F, 0, 0.12);
+  add('side', V(L / 2, 0, W / 2), S, 0, [0, t]);
+  add('back', V(0, 0, 0), B, 0, 0.12);
+  add('side2', V(-L / 2, 0, W / 2), S2, 0, [0, t]);
+  // 膠邊黏在左側面的內側，從正面內側往下（不碰到正面外表面，否則紙邊會從正面左緣透出白線）
+  add('glue', V(-L / 2 + t + 0.06, 0, W - t - 1 - k.piece('glue').w / 2), { r: V(0, 0, 1), u: V(0, 1, 0), n: V(-1, 0, 0) }, 0, [0, t + 0.1]);
+  // 上蓋：背面上緣為轉軸，開合滑桿控制；插舌跟著上蓋，打開時慢慢攤平
+  // 站立時最開可以往後仰過垂直約 36°（像實物翻開的樣子）；平放時背面貼桌面，最多攤平
+  const stand = d.pose === 'stand';
+  const lidPhi = (Math.PI / 2) * (1 - k.open * (stand ? 1.4 : 1));
+  const lidF = foldFrame(B, 1, lidPhi);
+  const hingeTop = V(0, H / 2, 0);
+  add('lidTop', hingeTop.clone().addScaledVector(lidF.dir, W / 2), lidF);
+  // 插舌打開時不會完全攤平，保留約 57° 往內折。
+  // 轉軸與內縮量隨折角變化（同防塵翼）：攤開時外表面與上蓋連續，闔上時插進正面內側
+  const tuckPhi = (Math.PI / 2) * (1 - k.open) + 1 * k.open;
+  const tuckF = foldFrame(lidF, 1, tuckPhi), ts = Math.sin(tuckPhi);
+  add('tuckTop', hingeTop.clone().addScaledVector(lidF.dir, W).addScaledVector(lidF.n, -t * ts).addScaledVector(tuckF.dir, T / 2), tuckF, (t + 0.08) * ts, [t + 0.3, 0]);
+  // 防塵翼接在側面上緣（側面比盒高短一個紙厚，讓上下蓋蓋住）：攤開時外表面與側面連續，
+  // 折進盒內時轉軸移到側面內側、緊貼在蓋子下方。寬度比盒內略窄（實際刀模也是如此）
+  const dust = (id, sx, sy, f, phi) => {
+    const s = Math.sin(phi);
+    add(id, V(sx * (L / 2 - t * s), sy * (H / 2 - t), W / 2).addScaledVector(f.dir, D / 2), f, 0.04 * s, [t + 0.3, 0]);
+  };
+  // 上方防塵翼：蓋子打開時微微彈起
+  const dPhi = (Math.PI / 2) * (1 - 0.3 * k.open);
+  dust('dustT1', 1, 1, foldFrame(S, 1, dPhi), dPhi);
+  dust('dustT2', -1, 1, foldFrame(S2, 1, dPhi), dPhi);
+  // 下蓋（接在正面下緣）與下插舌、下方防塵翼：都是闔上的
+  const lbF = foldFrame(F, -1, Math.PI / 2);
+  const hingeBot = V(0, -H / 2, W);
+  add('lidBot', hingeBot.clone().addScaledVector(lbF.dir, W / 2), lbF);
+  const tbF = foldFrame(lbF, -1, Math.PI / 2);
+  add('tuckBot', hingeBot.clone().addScaledVector(lbF.dir, W).addScaledVector(lbF.n, -t).addScaledVector(tbF.dir, T / 2), tbF, t + 0.08, [t + 0.3, 0]);
+  dust('dustB1', 1, -1, foldFrame(S, -1, Math.PI / 2), Math.PI / 2);
+  dust('dustB2', -1, -1, foldFrame(S2, -1, Math.PI / 2), Math.PI / 2);
+  if (!stand) return g;
+  // 站立：底部貼桌面、正面朝鏡頭（物件座標 +Z 朝上、-Y 朝向觀看者）
+  const root = new THREE.Group();
+  g.rotation.x = Math.PI / 2;
+  root.add(g);
+  return root;
+}
+
 const PRODUCTS = [
   {
     id: 'flat', group: 'print', name: '平面印刷品', sub: '名片・明信片・海報',
@@ -2418,6 +2721,15 @@ const PRODUCTS = [
     build(k) {
       return k.models && k.models.jewel ? buildJewelFromModel(k) : buildJewelProcedural(k);
     },
+  },
+  {
+    id: 'rte', group: 'box', name: '反插盒', sub: '上下插舌・彩盒',
+    dims: { w: 70, h: 120, d: 40, pose: 'lie' }, fields: ['w', 'd', 'h'], gsm: 350, open: 0.35,
+    options: [{ key: 'pose', label: '擺放', choices: [['lie', '平放（背面貼桌面）'], ['stand', '站立（底部貼桌面）']], geometryOnly: true, reframe: true }],
+    upright: (d) => d.pose === 'stand',
+    presets: [['保養品盒 60 × 40 × 160', 60, 160, 40], ['小方盒 80 × 80 × 80', 80, 80, 80], ['扁盒 120 × 30 × 160', 120, 160, 30], ['香水盒 55 × 55 × 120', 55, 120, 55]],
+    layout: rteLayout,
+    build: buildRTE,
   },
 ];
 
@@ -3218,7 +3530,10 @@ function spreadCanvas(i, pages, W, H, rtl = false) {
 }
 
 // blank：不印刷的面（例如內袋的內側）
-const ROLE = { front: drawFront, back: drawBack, spine: drawSpine, inner: drawInner, blank: () => {} };
+// fill：紙盒的盒蓋、插舌、防塵翼等，只鋪底色
+function drawFill(ctx, w, h, kind) { if (kind === 'art') { ctx.fillStyle = '#0f1a2e'; ctx.fillRect(0, 0, w, h); } }
+
+const ROLE = { front: drawFront, back: drawBack, spine: drawSpine, inner: drawInner, fill: drawFill, blank: () => {} };
 
 // kind: 'art' 或遮罩名稱（title / moon / rings / logo / window）
 function sampleCanvas(layout, side, kind, ppm) {
@@ -3292,6 +3607,7 @@ function mirrorPieces(layout, side) {
   return layout.pieces.map((p) => ({
     ...p,
     x: side === 'out' ? p.x : layout.W - p.x - p.w,
+    poly: p.poly && side !== 'out' ? p.poly.map(([x, y]) => [layout.W - x, y]).reverse() : p.poly,
     label: side === 'out' ? p.name : p.inName || p.name,
   }));
 }
@@ -3315,7 +3631,22 @@ function bleedRects(pieces) {
   return rects.map((r) => ({ x: r.x - BLEED, y: r.y - BLEED, w: r.w + BLEED * 2, h: r.h + BLEED * 2 }));
 }
 
-const isFoldEdge = (folds, a, b, c, d) => a === c && folds.some((f) => Math.abs(f.x1 - a) < 0.01 && Math.min(b, d) >= Math.min(f.y1, f.y2) - 0.01 && Math.max(b, d) <= Math.max(f.y1, f.y2) + 0.01);
+// 這段裁切邊是否落在某條折線上（直的或橫的折線都可以）
+// 不在折線上的外框線段（裁切線）
+function cutSegments(pieces, folds) {
+  return pieces.flatMap((p) => pieceEdges(p)).filter(([a, b, c, d]) => !isFoldEdge(folds, a, b, c, d));
+}
+const isFoldEdge = (folds, a, b, c, d) => folds.some((f) => {
+  const e = 0.01;
+  if (Math.abs(f.x1 - f.x2) < e) return Math.abs(a - f.x1) < e && Math.abs(c - f.x1) < e && Math.min(b, d) >= Math.min(f.y1, f.y2) - e && Math.max(b, d) <= Math.max(f.y1, f.y2) + e;
+  if (Math.abs(f.y1 - f.y2) < e) return Math.abs(b - f.y1) < e && Math.abs(d - f.y1) < e && Math.min(a, c) >= Math.min(f.x1, f.x2) - e && Math.max(a, c) <= Math.max(f.x1, f.x2) + e;
+  return false;
+});
+// 一片的外框線段：有 poly（不規則外形，例如紙盒的插舌、防塵翼）就用多邊形，否則是矩形
+function pieceEdges(p) {
+  const pts = p.poly || [[p.x, p.y], [p.x + p.w, p.y], [p.x + p.w, p.y + p.h], [p.x, p.y + p.h]];
+  return pts.map((q, i) => { const r = pts[(i + 1) % pts.length]; return [q[0], q[1], r[0], r[1]]; });
+}
 
 function mirrorFolds(layout, side) {
   return layout.folds.map((f) => side === 'out' ? f : { x1: layout.W - f.x1, y1: f.y1, x2: layout.W - f.x2, y2: f.y2 });
@@ -3352,16 +3683,28 @@ function drawDieline(canvas, o) {
   const X = (mm) => ox + mm * s, Y = (mm) => oy + mm * s;
   const pieces = mirrorPieces(layout, side);
 
-  // 出血範圍（每片各自外擴 3mm）
-  const bleeds = bleedRects(pieces);
+  // 出血範圍（每片各自外擴 3mm）。不規則外形（紙盒）改成沿裁切線外擴的一條帶，矩形會互相重疊
+  const irregular = pieces.some((p) => p.poly);
+  const bleeds = irregular ? [] : bleedRects(pieces);
+  const cuts = cutSegments(pieces, mirrorFolds(layout, side));
   ctx.fillStyle = 'rgba(229,72,77,0.08)';
   for (const b of bleeds) ctx.fillRect(X(b.x), Y(b.y), b.w * s, b.h * s);
+  if (irregular) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(229,72,77,0.16)'; ctx.lineWidth = 2 * BLEED * s; ctx.lineCap = ctx.lineJoin = 'round';
+    ctx.beginPath(); for (const [a, b, c, d] of cuts) { ctx.moveTo(X(a), Y(b)); ctx.lineTo(X(c), Y(d)); } ctx.stroke();
+    ctx.restore();
+  }
 
   // 圖稿
   if (preview) {
     ctx.save();
     ctx.beginPath();
-    for (const p of pieces) ctx.rect(X(p.x), Y(p.y), p.w * s, p.h * s);
+    for (const p of pieces) {
+      if (!p.poly) { ctx.rect(X(p.x), Y(p.y), p.w * s, p.h * s); continue; }
+      p.poly.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
+      ctx.closePath();
+    }
     ctx.clip();
     ctx.imageSmoothingQuality = 'high';
     if (showArt) ctx.drawImage(preview, X(0), Y(0), layout.W * s, layout.H * s);
@@ -3430,10 +3773,7 @@ function outline(ctx, pieces, layout, side, X, Y) {
   // 相鄰且有折線的片合併外框：直接畫每片外框，折線處之後會被虛線覆蓋
   const folds = mirrorFolds(layout, side);
   for (const p of pieces) {
-    const edges = [
-      [p.x, p.y, p.x + p.w, p.y], [p.x + p.w, p.y, p.x + p.w, p.y + p.h],
-      [p.x + p.w, p.y + p.h, p.x, p.y + p.h], [p.x, p.y + p.h, p.x, p.y],
-    ];
+    const edges = pieceEdges(p);
     for (const [a, b, c, d] of edges) {
       if (isFoldEdge(folds, a, b, c, d)) continue;
       ctx.beginPath(); ctx.moveTo(X(a), Y(b)); ctx.lineTo(X(c), Y(d)); ctx.stroke();
@@ -3471,17 +3811,19 @@ function dielineSVG(layout, title, side = 'out') {
   r.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`);
   r.push(`<title>${title}（${side === 'out' ? '外側' : '內側'}）刀模範本</title>`);
   r.push(`<g id="bleed" fill="none" stroke="${C.bleed}" stroke-width="0.2" stroke-dasharray="1 1">`);
-  for (const b of bleedRects(pieces)) r.push(`<rect x="${o + b.x}" y="${o + b.y}" width="${b.w}" height="${b.h}"/>`);
+  if (pieces.some((p) => p.poly)) {
+    // 不規則外形：出血範圍是沿裁切線外擴 3 mm 的帶（半透明），不畫矩形
+    r.push(`<g stroke="${C.bleed}" stroke-opacity="0.25" stroke-width="${2 * BLEED}" stroke-linecap="round" stroke-dasharray="none">`);
+    for (const [a, b, c, d] of cutSegments(pieces, folds)) r.push(`<line x1="${o + a}" y1="${o + b}" x2="${o + c}" y2="${o + d}"/>`);
+    r.push('</g>');
+  } else for (const b of bleedRects(pieces)) r.push(`<rect x="${o + b.x}" y="${o + b.y}" width="${b.w}" height="${b.h}"/>`);
   r.push('</g>');
   r.push(`<g id="safe" fill="none" stroke="${C.safe}" stroke-width="0.15" stroke-dasharray="0.6 0.8">`);
-  for (const p of pieces) if (p.w > 12) r.push(`<rect x="${o + p.x + 3}" y="${o + p.y + 3}" width="${p.w - 6}" height="${p.h - 6}"/>`);
+  for (const p of pieces) if (p.w > 12 && !p.poly && p.role !== 'fill') r.push(`<rect x="${o + p.x + 3}" y="${o + p.y + 3}" width="${p.w - 6}" height="${p.h - 6}"/>`);
   r.push('</g>');
   r.push(`<g id="cut" fill="none" stroke="${C.cut}" stroke-width="0.25">`);
   for (const p of pieces) {
-    const edges = [
-      [p.x, p.y, p.x + p.w, p.y], [p.x + p.w, p.y, p.x + p.w, p.y + p.h],
-      [p.x + p.w, p.y + p.h, p.x, p.y + p.h], [p.x, p.y + p.h, p.x, p.y],
-    ];
+    const edges = pieceEdges(p);
     for (const [a, b, c, d] of edges) {
       if (isFoldEdge(folds, a, b, c, d)) continue;
       r.push(`<line x1="${o + a}" y1="${o + b}" x2="${o + c}" y2="${o + d}"/>`);
@@ -4087,7 +4429,8 @@ function rebuildGeometry(frame, recenter = frame) {
   // 商品照模式可以擺多件（構圖），每件有自己的開合、翻面、位置與旋轉
   const instance = (ov = {}) => {
     const flipper = new THREE.Group();
-    flipper.rotation.y = (ov.flip ?? state.flip) ? Math.PI : 0;
+    // 站立的物件（例如直立的紙盒）翻面時繞垂直軸轉，看背面而不是倒過來
+    flipper.rotation[P.upright?.(k.d) ? 'z' : 'y'] = (ov.flip ?? state.flip) ? Math.PI : 0;
     flipper.add(P.build({ ...k, open: ov.open ?? k.open, discOut: ov.disc ?? k.discOut }));
     return flipper;
   };
@@ -4160,9 +4503,11 @@ function arrange(root, instance, comp) {
       put({}, W * 0.28, -H * 0.58);
       break;
     case 'openClosed': {
-      const closed = measure({ open: 0 });
-      put({ open: 0 }, -W * 0.3 - closed.w * 0.05, H * 0.58);
-      put({ open: 1 }, W * 0.2, -H * 0.58);
+      // 依闔上與全開各自的佔地錯開，上下間距至少兩者半高相加再留一點空，打開的蓋子不會壓到另一件
+      const closed = measure({ open: 0 }), opened = measure({ open: 1 });
+      const dy = (closed.h + opened.h) / 2 + Math.max(closed.h, opened.h) * 0.08;
+      put({ open: 0 }, -opened.w * 0.18, dy / 2);
+      put({ open: 1 }, closed.w * 0.18, -dy / 2);
       break;
     }
     case 'reveal':
@@ -4690,7 +5035,7 @@ let productCat = null;
 function renderProducts() {
   productCat ||= product().group;
   for (const b of $('#prod-cat').children) b.setAttribute('aria-pressed', String(b.dataset.g === productCat));
-  for (const g of ['print', 'album']) {
+  for (const g of ['print', 'album', 'box']) {
     const box = $(`#products-${g}`);
     box.hidden = g !== productCat;
     box.innerHTML = '';
@@ -4700,7 +5045,7 @@ function renderProducts() {
   }
   // 分隔線下標示目前的品項：切換類別只是瀏覽，下方的尺寸與選項仍屬於這個品項
   const P = product();
-  const other = P.group !== productCat ? `<em>屬於${P.group === 'print' ? '一般印刷' : '專輯包裝'}</em>` : '';
+  const other = P.group !== productCat ? `<em>屬於${{ print: '一般印刷', album: '專輯包裝', box: '紙盒包裝' }[P.group]}</em>` : '';
   $('#cur-product').innerHTML = `<small>目前品項</small><b>${P.name}</b>${other}`;
 }
 
@@ -4721,7 +5066,7 @@ function selectProduct(id) {
 
 function syncProductUI() {
   const P = product(), d = dims();
-  for (const f of ['w', 'h', 's', 'r']) {
+  for (const f of ['w', 'h', 'd', 's', 'r']) {
     const lab = $(`.num[data-f="${f}"]`);
     lab.hidden = !P.fields.includes(f);
     $(`#dim-${f}`).value = d[f] ?? '';
@@ -4732,7 +5077,7 @@ function syncProductUI() {
   $('#preset-row').hidden = !P.presets;
   if (P.presets) {
     pre.innerHTML = '<option value="">自訂尺寸</option>' + P.presets.map((p, i) => `<option value="${i}">${p[0]}</option>`).join('');
-    const i = P.presets.findIndex((p) => p[1] === d.w && p[2] === d.h);
+    const i = P.presets.findIndex((p) => p[1] === d.w && p[2] === d.h && (p[3] === undefined || p[3] === d.d));
     pre.value = i >= 0 ? String(i) : '';
   }
   $('#gsm').value = String(state.gsm);
@@ -4771,7 +5116,8 @@ function renderOptions() {
   box.hidden = !P.options;
   if (!P.options) return;
   const apply = (o) => {
-    if (o.geometryOnly) { updateSheetInfo(); rebuildGeometry(false, true); if (P.options.some((x) => x.when)) renderOptions(); return; }
+    // reframe：換擺放方式（平放／站立）時外形差很多，重新取景
+    if (o.geometryOnly) { updateSheetInfo(); rebuildGeometry(!!o.reframe, true); if (P.options.some((x) => x.when)) renderOptions(); return; }
     renderOptions();
     rebuildLayout(false);
   };
@@ -4814,11 +5160,11 @@ const fmt = (v) => (Math.round(v * 10) / 10).toString();
 
 let dimTimer = 0;
 function bindDims() {
-  for (const f of ['w', 'h', 's', 'r']) {
+  for (const f of ['w', 'h', 'd', 's', 'r']) {
     $(`#dim-${f}`).addEventListener('input', (e) => {
       const v = parseFloat(e.target.value);
       if (!Number.isFinite(v)) return;
-      const lim = { w: [20, 1200], h: [20, 1200], s: [0, 30], r: [0, 40] }[f];
+      const lim = { w: [20, 1200], h: [20, 1200], d: [5, 600], s: [0, 30], r: [0, 40] }[f];
       dims()[f] = clamp(v, lim[0], lim[1]);
       clearTimeout(dimTimer);
       dimTimer = setTimeout(() => { syncPresetOnly(); rebuildLayout(true); }, 350);
@@ -4828,7 +5174,7 @@ function bindDims() {
     const P = product();
     if (e.target.value === '') return;
     const p = P.presets[+e.target.value];
-    Object.assign(dims(), { w: p[1], h: p[2] });
+    Object.assign(dims(), { w: p[1], h: p[2] }, p[3] !== undefined ? { d: p[3] } : {});
     syncProductUI();
     rebuildLayout(true);
   });
@@ -4842,7 +5188,7 @@ function bindDims() {
 function syncPresetOnly() {
   const P = product(), d = dims();
   if (!P.presets) return;
-  const i = P.presets.findIndex((p) => p[1] === d.w && p[2] === d.h);
+  const i = P.presets.findIndex((p) => p[1] === d.w && p[2] === d.h && (p[3] === undefined || p[3] === d.d));
   $('#preset').value = i >= 0 ? String(i) : '';
 }
 
@@ -5365,7 +5711,7 @@ function syncRanges() {
 function updateRail() {
   syncRanges();
   const d = dims(), P = product();
-  $('#sum-product').textContent = P.name + (d.w && d.h ? `・${fmt(d.w)}×${fmt(d.h)}` : '');
+  $('#sum-product').textContent = P.name + (d.w && d.h ? `・${fmt(d.w)}×${d.d ? fmt(d.d) + '×' : ''}${fmt(d.h)}` : '');
   $('#sum-paper').textContent = `${paper().name}・${state.gsm} g`;
   const ups = ['out', 'in', 'disc'].filter((k) => state.art[k]).length + Object.keys(state.art).filter((k) => k.includes(':') && state.art[k]).length + state.art.spreads.filter(Boolean).length;
   $('#sum-art').textContent = ups ? `已上傳 ${ups} 個檔案` : '使用範例圖稿';
@@ -5394,12 +5740,25 @@ function bindPhoto() {
     state.photo.h = clamp(Math.round(+$('#ph-h').value || 1080), 200, 8000);
     reframe();
   });
+  // 「歌本攤開」構圖會暫時改掉托盤、歌本與開合設定；換回其他構圖時還原，不影響使用者原本的設定
+  let spreadSaved = null;
   $('#ph-comp').addEventListener('change', (e) => {
     state.photo.comp = e.target.value;
     if (state.photo.comp === 'spread') {
       // 參考圖的擺法：不附托盤的書型 Digipak，歌本黏在右側內頁、隨外盒攤平
-      Object.assign(dims(), { tray: 'none', booklet: 'glued', bkView: 'open', bkAlign: 'spine' });
+      const d = dims();
+      spreadSaved ||= { product: state.product, d: { tray: d.tray, booklet: d.booklet, bkView: d.bkView, bkAlign: d.bkAlign }, open: state.open, bkOpen: state.bkOpen };
+      Object.assign(d, { tray: 'none', booklet: 'glued', bkView: 'open', bkAlign: 'spine' });
       state.open = state.bkOpen = 1; $('#open').value = $('#bkopen').value = 1;
+      renderOptions();
+      rebuildLayout(false);
+    } else if (spreadSaved) {
+      if (spreadSaved.product === state.product) {
+        Object.assign(dims(), spreadSaved.d);
+        state.open = spreadSaved.open; state.bkOpen = spreadSaved.bkOpen;
+        $('#open').value = state.open; $('#bkopen').value = state.bkOpen;
+      }
+      spreadSaved = null;
       renderOptions();
       rebuildLayout(false);
     } else rebuildGeometry(false, true);
