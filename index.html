@@ -3558,7 +3558,7 @@ function sampleCanvas(layout, side, kind, ppm) {
 
 // 黑膠圓標 / 光碟印刷面（正方形，圓形區域）
 function discCanvas(kind) {
-  const S = 1024, c = document.createElement('canvas');
+  const S = 2048, c = document.createElement('canvas');
   c.width = c.height = S;
   const ctx = c.getContext('2d');
   const cx = S / 2;
@@ -3575,7 +3575,7 @@ function discCanvas(kind) {
     ctx.fillText('LUNA HARBOR', cx, S * 0.72);
     ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx, cx, S * 0.036, 0, Math.PI * 2); ctx.fill();
   } else {
-    // 光碟印刷面只畫「油墨」，透明處代表不印刷（銀底時會露出金屬銀）。畫布 1024 px = 120 mm
+    // 光碟印刷面只畫「油墨」，透明處代表不印刷（銀底時會露出金屬銀）。畫布 2048 px = 120 mm
     const R = (mm) => (mm / 60) * cx;
     ctx.fillStyle = NAVY;
     ctx.beginPath();
@@ -4301,7 +4301,7 @@ labelTex.colorSpace = THREE.SRGBColorSpace; labelTex.anisotropy = 8;
 
 // 光碟印刷面：印刷色 + 金屬度/粗糙度。銀底時，圖稿透明（未印刷）處為金屬銀
 const discTex = (() => {
-  const S = 1024;
+  const S = 2048; // 120 mm 光碟約 17 px/mm，高於 300 dpi 圖稿（1417 px），大尺寸輸出時印刷面也清楚
   const mk = () => { const c = document.createElement('canvas'); c.width = c.height = S; return c; };
   const map = new THREE.CanvasTexture(mk()), orm = new THREE.CanvasTexture(mk());
   map.colorSpace = THREE.SRGBColorSpace;
@@ -4735,8 +4735,28 @@ let lastMasks = { out: [], in: [] };
 let overlayCache = null;
 let previewCache = null;
 
+// 輸出圖片時暫時提高的材質解析度（0 = 用設定值）
+let exportQuality = 0;
 function ppmFor() {
-  return Math.min(state.quality / layout.W, state.quality / layout.H, 48);
+  const q = exportQuality || state.quality;
+  return Math.min(q / layout.W, q / layout.H, 48);
+}
+
+// 輸出時需要的材質解析度：依取景框換算成輸出像素後，物件上每 mm 佔幾個輸出像素，
+// 讓展開圖貼圖的密度至少和輸出相同。貼圖總像素有上限（合成時每像素約 140 bytes），手機上限較低
+function exportTextureQuality(outH) {
+  const fr = frameRect;
+  if (!fr || bounds.isEmpty()) return state.quality;
+  const c = bounds.getCenter(new THREE.Vector3());
+  const rad = bounds.getSize(new THREE.Vector3()).length() / 2;
+  const d = Math.max(0.05, camera.position.distanceTo(c) - rad * 0.5); // 物件最靠近鏡頭的部分最大
+  const pxPerUnit = (outH / fr.h) * fr.H / (2 * d * Math.tan((camera.fov * DEG) / 2));
+  const ppm = (pxPerUnit / 100) * 1.15; // 場景 1 單位 = 100 mm
+  const maxPx = matchMedia('(pointer: coarse)').matches ? 5e6 : 10e6;
+  const ppmCap = Math.min(48, Math.sqrt(maxPx / (layout.W * layout.H)));
+  const q = Math.min(ppm, ppmCap) * Math.max(layout.W, layout.H);
+  const maxTex = renderer.capabilities.maxTextureSize;
+  return Math.min(maxTex, Math.max(state.quality, Math.ceil(q / 256) * 256));
 }
 
 const rasterCache = { key: '', map: new Map() };
@@ -5784,10 +5804,27 @@ function bindPhoto() {
 async function exportPhoto() {
   const btn = $('#ph-dl');
   btn.disabled = true;
+  const label = btn.textContent;
   const keep = { size: state.photo.size, pos: camera.position.clone(), target: controls.target.clone() };
   const fmt = state.photo.format, transparent = state.photo.bg === 'transparent';
   try {
     const list = state.photo.batch ? PHOTO_BATCH : [null];
+    // 先把材質解析度提高到輸出需要的密度（批次時取各尺寸中最高的），算好後再輸出，結束後還原
+    let q = state.quality;
+    for (const key of list) {
+      if (key) { state.photo.size = key; resize(); }
+      q = Math.max(q, exportTextureQuality(photoSize().h));
+    }
+    if (state.photo.batch) { state.photo.size = keep.size; resize(); camera.position.copy(keep.pos); controls.target.copy(keep.target); controls.update(); }
+    if (q > state.quality) {
+      btn.textContent = '提高材質解析度中…';
+      $('#busy').hidden = false;
+      exportQuality = q;
+      await regenTextures();
+      $('#busy').hidden = true;
+    }
+    btn.textContent = '輸出中…';
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     for (const key of list) {
       if (key) { state.photo.size = key; resize(); setView(state.lastView || 'top', true); controls.update(); }
       const { w, h } = photoSize();
@@ -5797,7 +5834,10 @@ async function exportPhoto() {
   } finally {
     // 批次時每個比例會自動重新取景，結束後回到原本的視角
     if (state.photo.batch) { state.photo.size = keep.size; resize(); camera.position.copy(keep.pos); controls.target.copy(keep.target); controls.update(); }
+    btn.textContent = label;
     btn.disabled = false;
+    // 還原平常的材質解析度（高解析度貼圖很佔記憶體，預覽時用不到）
+    if (exportQuality) { exportQuality = 0; texturesUI(); }
   }
 }
 
@@ -5893,20 +5933,24 @@ function exportImage({ width: targetW, height: targetH, format, transparent, nam
   const fr = frameRect;
   if (fr) { camera.setViewOffset(fr.W, fr.H, fr.x, fr.y, fr.w, fr.h); camera.updateProjectionMatrix(); }
   if (transparent) { scene.background = null; scene.fog = null; table.visible = false; renderer.setClearAlpha(0); }
+  // 超取樣：以最多 2 倍的尺寸算圖再縮小，細字、燙金邊緣與紙紋更銳利、不鋸齒。
+  // 總像素有上限（後製緩衝區很吃顯示記憶體），大尺寸輸出時倍率會自動降低
+  const maxPx = matchMedia('(pointer: coarse)').matches ? 6e6 : 14e6;
+  const maxDim = Math.min(renderer.capabilities.maxTextureSize, 8192);
+  const ss = Math.max(1, Math.min(2, Math.sqrt(maxPx / (targetW * targetH)), maxDim / targetW, maxDim / targetH));
+  const rw = Math.round(targetW * ss), rh = Math.round(targetH * ss);
   renderer.setPixelRatio(1);
-  renderer.setSize(targetW, targetH, false);
-  sizeComposer(targetW, targetH, 1);
+  renderer.setSize(rw, rh, false);
+  sizeComposer(rw, rh, 1);
   renderFrame(transparent); // 透明背景直接算圖，保留透明度
-  let url;
-  if (format === 'jpg') {
-    // JPG 沒有透明：先鋪桌面色再轉檔
-    const c = document.createElement('canvas');
-    c.width = targetW; c.height = targetH;
-    const x = c.getContext('2d');
-    x.fillStyle = backdrop() === 'table' ? state.bg : '#ffffff'; x.fillRect(0, 0, targetW, targetH);
-    x.drawImage(renderer.domElement, 0, 0);
-    url = c.toDataURL('image/jpeg', 0.92);
-  } else url = renderer.domElement.toDataURL('image/png');
+  const c = document.createElement('canvas');
+  c.width = targetW; c.height = targetH;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  // JPG 沒有透明：先鋪桌面色再轉檔
+  if (format === 'jpg') { x.fillStyle = backdrop() === 'table' ? state.bg : '#ffffff'; x.fillRect(0, 0, targetW, targetH); }
+  x.drawImage(renderer.domElement, 0, 0, rw, rh, 0, 0, targetW, targetH);
+  const url = format === 'jpg' ? c.toDataURL('image/jpeg', 0.95) : c.toDataURL('image/png');
   scene.background = bg; scene.fog = fog;
   applyBackdrop();
   renderer.setPixelRatio(pr);
