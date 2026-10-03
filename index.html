@@ -571,6 +571,18 @@ input[type="range"]:hover { border-color: var(--ink-2); }
         <input type="range" id="soft" min="0" max="1" step="0.05">
       </div>
       <div class="row">
+        <label for="fill">補光</label>
+        <input type="range" id="fill" min="0" max="1" step="0.05">
+      </div>
+      <div class="row">
+        <label for="rim">輪廓光</label>
+        <input type="range" id="rim" min="0" max="1" step="0.05">
+      </div>
+      <div class="row">
+        <label for="tint">陰影色調</label>
+        <select id="tint"></select>
+      </div>
+      <div class="row">
         <label for="bg">桌面顏色</label>
         <input type="color" id="bg">
       </div>
@@ -3994,7 +4006,7 @@ const state = {
     newLayer('spotuv', { params: { raised: 0.35 } }),
     newLayer('emboss', { params: { depth: 0.35, soft: 0.6 } }),
   ],
-  light: 'natural', az: -137, sweep: false, bg: '#333333', soft: 0.3, focal: 85, ao: 0.8, env: 'hdri', flip: false, tableTex: 'paper', quality: 2048,
+  light: 'natural', az: -137, sweep: false, bg: '#333333', soft: 0.3, fill: 0.2, rim: 0.2, tint: 'neutral', focal: 85, ao: 0.8, env: 'hdri', flip: false, tableTex: 'paper', quality: 2048,
   view: '3d', dieSide: 'out', dieArt: true, dieFinish: true,
   bkOpen: 1, // 可翻開的歌本翻開多少（0 = 闔上，1 = 攤平在「攤開頁面」）
   bkFan: 0.6, // 翻開途中其他頁面跟著散開的程度
@@ -4032,7 +4044,46 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, matchMedia('(point
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.VSMShadowMap; // VSM 可以做出邊緣模糊的柔和陰影
+// 接觸變銳利的柔和陰影（PCSS）：先找出擋住光線的物體離接收面多遠，距離越遠陰影越散開。
+// 貼著桌面的邊緣清楚、遠離物件的地方柔和，和真實柔光箱一樣（VSM 只能整片同樣模糊）
+renderer.shadowMap.type = THREE.PCFShadowMap;
+{
+  const N = matchMedia('(pointer: coarse)').matches ? 16 : 32;
+  // 主光陰影相機的 far / near 固定為 8（見 updateLight），所以可以直接把深度圖的值換回以 near 為單位的距離
+  const PCSS = `
+#define PCSS_N ${N}
+#define PCSS_K 4.0
+float pcssLin( float d ) { return 1.0 / ( 1.0 - d * 0.875 ); }
+float pcssNoise( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) ); }
+vec2 pcssDisk( int i, float rot ) {
+  float r = sqrt( ( float( i ) + 0.5 ) / float( PCSS_N ) );
+  float a = float( i ) * 2.39996323 + rot;
+  return r * vec2( cos( a ), sin( a ) );
+}
+float pcssShadow( sampler2D map, vec2 mapSize, float lightSize, vec4 c ) {
+  vec2 texel = 1.0 / mapSize;
+  float rot = pcssNoise( gl_FragCoord.xy ) * 6.2831853;
+  float search = lightSize * 2.0;
+  float sum = 0.0, cnt = 0.0;
+  for ( int i = 0; i < PCSS_N; i ++ ) {
+    float d = unpackRGBAToDepth( texture2D( map, c.xy + pcssDisk( i, rot ) * search * texel ) );
+    if ( d < c.z ) { sum += pcssLin( d ); cnt += 1.0; }
+  }
+  if ( cnt == 0.0 ) return 1.0;
+  float zB = sum / cnt, zR = pcssLin( c.z );
+  float pen = clamp( ( zR - zB ) / zB * lightSize * PCSS_K, 1.2, search );
+  float lit = 0.0;
+  for ( int i = 0; i < PCSS_N; i ++ ) lit += texture2DCompare( map, c.xy + pcssDisk( i, rot + 1.3 ) * pen * texel, c.z );
+  return lit / float( PCSS_N );
+}
+`;
+  const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+  const at = chunk.indexOf('float getShadow(');
+  const head = chunk.slice(0, at), tail = chunk.slice(at);
+  const patched = tail.replace('#if defined( SHADOWMAP_TYPE_PCF )',
+    '#if defined( SHADOWMAP_TYPE_PCF )\n\t\t\tshadow = pcssShadow( shadowMap, shadowMapSize, shadowRadius, shadowCoord );\n\t\t#elif defined( PCSS_REPLACED_PCF )');
+  if (at > 0 && patched !== tail) THREE.ShaderChunk.shadowmap_pars_fragment = head + PCSS + patched;
+}
 host.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -4109,8 +4160,8 @@ function applyEnv() {
 const key = new THREE.SpotLight(0xffffff, 2.3, 0, 0.6, 1, 0);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.bias = -0.0006;
-key.shadow.blurSamples = 24;
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.002;
 scene.add(key, key.target);
 
 // 反光板：長條柔光箱，永遠放在鏡頭對產品的鏡射方向上並往主光那側偏一些，
@@ -4132,6 +4183,38 @@ function updateGlint(sweep = 0) {
   glint.lookAt(c);
   glint.intensity = L.glint ?? 0;
   glint.color.set(L.warm ? 0xfff0dc : 0xffffff);
+}
+
+// 補光板與輪廓光（都不投射陰影）：
+// 補光 = 主光對面的大片白色反光板，把暗面與陰影提亮；陰影色調由補光的顏色決定（攝影常用彩色反光板讓陰影偏冷或偏暖）
+// 輪廓光 = 在產品後方、跟著鏡頭的長條燈，讓邊緣與紙張切邊出現一道亮邊，和背景分開
+const TINTS = {
+  neutral: { name: '中性', fill: 0xffffff, shadow: 0x000000 },
+  cool: { name: '冷調（藍灰）', fill: 0xc9dcff, shadow: 0x0a1426 },
+  warm: { name: '暖調（琥珀）', fill: 0xffdcb8, shadow: 0x24140a },
+};
+const fillLight = new THREE.RectAreaLight(0xffffff, 0, 1, 1);
+const rimLight = new THREE.RectAreaLight(0xffffff, 0, 1, 1);
+scene.add(fillLight, rimLight);
+function updateFillRim(sweep = 0) {
+  const c = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
+  const r = bounds.isEmpty() ? 2 : bounds.getSize(new THREE.Vector3()).length() / 2;
+  // 補光：主光的對面、低角度（約 22°）
+  const a = (state.az + sweep) * DEG + Math.PI, e = 22 * DEG;
+  fillLight.position.copy(c).add(new THREE.Vector3(Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e)).multiplyScalar(r * 4));
+  fillLight.width = r * 3.2; fillLight.height = r * 2;
+  fillLight.lookAt(c);
+  fillLight.intensity = state.fill * 1.4;
+  fillLight.color.set((TINTS[state.tint] || TINTS.neutral).fill);
+  // 輪廓光：鏡頭水平方向的正後方、低角度（約 14°）掠過產品：桌面受光少，產品的邊緣、切邊與立起的面亮起來
+  const v = camera.position.clone().sub(c); v.y = 0;
+  if (v.lengthSq() < 1e-6) v.set(0, 0, 1);
+  v.normalize().negate();
+  const re = 14 * DEG;
+  rimLight.position.copy(c).add(new THREE.Vector3(v.x * Math.cos(re), Math.sin(re), v.z * Math.cos(re)).multiplyScalar(r * 2.6));
+  rimLight.width = r * 3.4; rimLight.height = r * 0.8;
+  rimLight.lookAt(c);
+  rimLight.intensity = state.rim * 16;
 }
 
 // 桌面
@@ -4221,7 +4304,7 @@ const contact = (() => {
     sh.uniforms.darkness = depthMat.userData.darkness;
     sh.fragmentShader = 'uniform float darkness;\n' + sh.fragmentShader.replace(
       'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
-      'gl_FragColor = vec4( vec3( 0.0 ), ( 1.0 - fragCoordZ ) * darkness );'
+      'gl_FragColor = vec4( vec3( 1.0 ), ( 1.0 - fragCoordZ ) * darkness );' // 顏色由接觸陰影平面的 color 決定（陰影色調）
     );
   };
   depthMat.depthTest = depthMat.depthWrite = false;
@@ -4274,7 +4357,9 @@ const contact = (() => {
     scene.background = bg; scene.fog = fog;
     plane.visible = true; table.visible = tableWas;
   }
-  return { update };
+  const setTint = (hex) => plane.material.color.set(hex);
+  setTint(0x000000);
+  return { update, setTint };
 })();
 
 // 紙的切邊與歌本內頁塊：俯看時側面幾乎垂直於畫面，深度測試在這種陡峭面上不準，
@@ -4576,6 +4661,13 @@ function setView(name, instant) {
 
 /* ---------- 光線 ---------- */
 
+function applyTint() {
+  const T = TINTS[state.tint] || TINTS.neutral;
+  contact.setTint(T.shadow);
+  catcher.material.color.set(T.shadow);
+  invalidate();
+}
+
 function updateLight(sweep = 0) {
   const L = LIGHTS[state.light];
   const c = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
@@ -4587,9 +4679,9 @@ function updateLight(sweep = 0) {
   key.intensity = L.key;
   key.angle = L.spread;
   key.color.set(L.warm ? 0xffe4c0 : 0xffffff);
-  key.shadow.radius = 2 + state.soft * 26;
+  key.shadow.radius = 3 + state.soft * 40; // PCSS 的光源大小（貼圖像素）：越大，遠離接觸處的陰影越散
   key.shadow.camera.near = r * 1.5;
-  key.shadow.camera.far = r * 12;
+  key.shadow.camera.far = r * 12; // far / near = 8：PCSS 著色器以此換算深度（pcssLin），兩者要一起改
   const hdri = scene.environment === envs.hdri;
   scene.environmentIntensity = L.env * (hdri ? HDRI_GAIN : 1);
   scene.environmentRotation.y = (state.az + sweep - (hdri ? HDRI_KEY_AZ : SOFTBOX_AZ)) * DEG;
@@ -5551,7 +5643,7 @@ function bindLayers() {
 /* ---------- 5 場景 ---------- */
 
 // 場景偏好（光線、桌面顏色與材質、陰影柔和度）存在瀏覽器，下次打開沿用
-const SCENE_KEYS = ['light', 'az', 'bg', 'soft', 'tableTex', 'quality', 'focal', 'ao', 'env'];
+const SCENE_KEYS = ['light', 'az', 'bg', 'soft', 'fill', 'rim', 'tint', 'tableTex', 'quality', 'focal', 'ao', 'env'];
 // 預設值更新時換一個鍵，讓舊的瀏覽器紀錄不會蓋掉新預設
 const PREFS_KEY = 'proofroom-scene-v3';
 function loadScenePrefs() {
@@ -5560,6 +5652,7 @@ function loadScenePrefs() {
     for (const k of SCENE_KEYS) if (saved[k] !== undefined) state[k] = saved[k];
     if (!LIGHTS[state.light]) state.light = 'natural';
     if (!TABLES[state.tableTex]) state.tableTex = 'paper';
+    if (!TINTS[state.tint]) state.tint = 'neutral';
   } catch { /* 無法讀取時使用內建預設 */ }
 }
 function saveScenePrefs() {
@@ -5613,6 +5706,15 @@ function bindScene() {
   $('#soft').value = state.soft;
   $('#soft').addEventListener('input', (e) => { state.soft = +e.target.value; updateLight(); });
   $('#soft').addEventListener('change', () => updateContactShadow());
+  for (const k of ['fill', 'rim']) {
+    $('#' + k).value = state[k];
+    $('#' + k).addEventListener('input', (e) => { state[k] = +e.target.value; invalidate(); });
+  }
+  const tn = $('#tint');
+  tn.innerHTML = Object.entries(TINTS).map(([k, t]) => `<option value="${k}">${t.name}</option>`).join('');
+  tn.value = state.tint;
+  tn.addEventListener('change', () => { state.tint = tn.value; applyTint(); });
+  applyTint();
   $('#flip').addEventListener('click', () => {
     state.flip = !state.flip;
     $('#flip').setAttribute('aria-pressed', String(state.flip));
@@ -6022,7 +6124,9 @@ function loop(now) {
   if (moved) lastCam.copy(camera.matrixWorld);
   const motion = !!tween || orbiting || moved;
   if (!motion && !state.sweep && now > renderUntil && !hqPending) return;
-  updateGlint(state.sweep ? Math.sin((now - sweepT0) / 1000 * 0.6) * 60 : 0);
+  const sw = state.sweep ? Math.sin((now - sweepT0) / 1000 * 0.6) * 60 : 0;
+  updateGlint(sw);
+  updateFillRim(sw);
   if (motion) { renderFrame(false, true); hqPending = true; return; }
   renderFrame();
   hqPending = false;
