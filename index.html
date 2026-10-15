@@ -211,6 +211,7 @@ input[type="range"]:hover { border-color: var(--ink-2); }
 .meta { margin: 0; font: 11.5px/1.7 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .hint { margin: 0; font-size: 12px; color: var(--ink-2); line-height: 1.7; }
 .hint b { color: var(--ink); font-weight: 500; }
+#vd-note { white-space: pre-line; } /* 構圖提醒與尺寸說明分兩行 */
 .sec > .hint:empty { display: none; }
 .sec > .hint { border: 1px solid var(--line); border-radius: var(--r-card); padding: 10px 12px; }
 .foot { font: 10.5px/1.6 var(--sans); color: var(--muted); margin: 24px 0 0; letter-spacing: 0.02em; }
@@ -288,6 +289,13 @@ input[type="range"]:hover { border-color: var(--ink-2); }
 .frame-tag { position: absolute; font: 500 11px var(--mono); letter-spacing: 0.06em; color: var(--ink-2); pointer-events: none; white-space: nowrap; }
 .frame-tag::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); margin-right: 8px; vertical-align: 1px; }
 .photo-sec .btn { width: 100%; margin-top: 4px; padding-block: 8px; }
+/* 影片：與上方的圖片輸出用一條線分開 */
+.photo-sec .vd-head { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--ink-2); font-size: 12px; letter-spacing: 0.04em; }
+.vd-bar { display: flex; gap: 8px; }
+.vd-bar .btn { flex: 1; min-width: 0; }
+.vd-time { display: flex; align-items: center; gap: 10px; }
+.vd-time input { flex: 1; min-width: 0; }
+.vd-time span { flex: none; font: 500 11px var(--mono); color: var(--muted); }
 /* 展開圖：工具列在上、圖在下，工具列換行變高時圖會自動讓位，不會互相重疊 */
 .die { background: var(--stage); display: flex; flex-direction: column; }
 .die-bar {
@@ -452,14 +460,14 @@ input[type="range"]:hover { border-color: var(--ink-2); }
     <button data-step="sec-art"><i>03</i><span><b>圖稿</b><small id="sum-art"></small></span></button>
     <button data-step="sec-finish"><i>04</i><span><b>後加工</b><small id="sum-finish"></small></span></button>
     <button data-step="sec-scene"><i>05</i><span><b>光線與場景</b><small id="sum-scene"></small></span></button>
-    <button data-step="photo-sec" class="rail-out"><i>06</i><span><b>輸出圖片</b><small id="sum-photo"></small></span></button>
+    <button data-step="photo-sec" class="rail-out"><i>06</i><span><b>輸出圖片／影片</b><small id="sum-photo"></small></span></button>
     <p class="rail-note">點選任一步驟調整設定，每一步下方是目前的設定摘要；最後一步輸出圖片。</p>
   </nav>
 
   <aside class="side" id="side">
     <section class="sec photo-sec" id="photo-sec">
-      <h2><span class="n">06 / OUTPUT</span>輸出圖片</h2>
-      <p class="lead">前面的設定都完成後，在這裡輸出圖片：社群貼文、電商主圖、4K 或印刷用的高解析度都可以。虛線框就是輸出範圍，可以轉動畫面或切換構圖來取景。</p>
+      <h2><span class="n">06 / OUTPUT</span>輸出圖片與影片</h2>
+      <p class="lead">前面的設定都完成後，在這裡輸出圖片或動畫影片：社群貼文、電商主圖、4K 或印刷用的高解析度都可以。虛線框就是輸出範圍，可以轉動畫面或切換構圖來取景。</p>
       <div class="row">
         <label for="ph-size">尺寸</label>
         <select id="ph-size"></select>
@@ -487,6 +495,36 @@ input[type="range"]:hover { border-color: var(--ink-2); }
       <label class="check"><input type="checkbox" id="ph-batch"> 同時輸出 IG 1:1、4:5、限動 9:16、橫幅 16:9</label>
       <button class="btn" id="ph-dl" data-download>下載圖片</button>
       <p class="hint" id="ph-note"></p>
+      <div class="grp-label vd-head">影片</div>
+      <div class="row">
+        <label for="vd-anim">動畫</label>
+        <select id="vd-anim"></select>
+      </div>
+      <div class="row">
+        <label for="vd-cam">鏡頭運動</label>
+        <select id="vd-cam">
+          <option value="none">固定</option>
+          <option value="push">緩慢推近</option>
+          <option value="orbit">左右環繞</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="vd-speed">速度</label>
+        <select id="vd-speed"><option value="0.7">慢</option><option value="1">標準</option><option value="1.4">快</option></select>
+      </div>
+      <div class="row">
+        <label for="vd-fps">影格率</label>
+        <select id="vd-fps"><option value="30">30 fps</option><option value="60">60 fps（更流暢，輸出較久）</option></select>
+      </div>
+      <label class="check"><input type="checkbox" id="vd-loop"> 首尾相接（做完再倒回，社群自動重播不會跳）</label>
+      <label class="check"><input type="checkbox" id="vd-fit"> 自動取景（框內容納打開、取出後的範圍）</label>
+      <div class="vd-bar">
+        <button class="btn ghost" id="vd-play">▶ 播放預覽</button>
+        <button class="btn ghost" id="vd-stop" disabled>■ 停止</button>
+      </div>
+      <div class="vd-time"><input type="range" id="vd-time" min="0" max="1" step="0.001" value="0" aria-label="動畫時間"><span id="vd-tlabel">0.0 / 0.0 秒</span></div>
+      <button class="btn" id="vd-dl" data-download>下載影片（MP4）</button>
+      <p class="hint" id="vd-note"></p>
     </section>
 
     <section class="sec" id="sec-product">
@@ -2334,6 +2372,21 @@ const PAGE_CHOICES = [[4, '4 頁'], [8, '8 頁'], [12, '12 頁'], [16, '16 頁']
 // Digipak 封面/封底紙板厚度（mm）
 const DIGIPAK_BOARD = 1.0;
 
+// 動畫：把光碟從托盤取出（lift 0 → 1）。先往上拔離卡扣，再往外（遠離書背）滑出托盤片，最後平放在桌面上。
+// 以托盤那片的座標計算，假設外盒已經攤平（動畫裡會先完全打開再取出）
+function liftDisc(cd, lift, g, trayPanel, spine, d, discZ) {
+  g.updateMatrixWorld(true);
+  const sp = trayPanel.obj.worldToLocal(spine.obj.getWorldPosition(new THREE.Vector3()));
+  const out = sp.x > 0 ? -1 : 1; // 遠離書背的方向
+  const sm = (x) => { const v = Math.min(1, Math.max(0, x)); return v * v * (3 - 2 * v); };
+  const z0 = discZ + 0.6, rise = 16;
+  const zTable = -DIGIPAK_BOARD / 2 + 0.62; // 托盤片攤平時外側貼桌面
+  const u = sm((lift - 0.18) / 0.62);
+  cd.position.x += out * u * (d.w / 2 + 61 + 6);
+  cd.position.z = z0 + rise * sm(lift / 0.25) + (zTable - z0 - rise) * sm((lift - 0.62) / 0.38);
+  cd.rotation.y = out * 0.16 * Math.sin(Math.PI * u); // 移動時微微傾斜
+}
+
 // 托盤 + 光碟 + 另一片上的歌本 + 兩片紙板，估算合起來需要的書背寬度
 function digipakNeeds(d) {
   const holder = d.tray === 'none' ? 0 : d.tray === 'foam' || d.tray === 'foamDark' ? 3.2 : 5.2;
@@ -2665,6 +2718,7 @@ const PRODUCTS = [
         const cd = makeCD(k.discTex);
         cd.position.z = discZ + 0.6;
         attach(trayPanel, cd);
+        if (k.discLift > 0) liftDisc(cd, k.discLift, g, trayPanel, spine, d, discZ);
         obstacles.push(cd);
       }
       if (d.booklet !== 'none') {
@@ -4010,6 +4064,8 @@ const state = {
   view: '3d', dieSide: 'out', dieArt: true, dieFinish: true,
   bkOpen: 1, // 可翻開的歌本翻開多少（0 = 闔上，1 = 攤平在「攤開頁面」）
   bkFan: 0.6, // 翻開途中其他頁面跟著散開的程度
+  // 影片：動畫、鏡頭運動、速度、影格率、首尾相接、自動取景
+  video: { anim: 'show', cam: 'push', speed: 1, fps: 30, loop: false, fit: true },
   // 商品照模式：輸出尺寸、構圖、背景
   photo: { size: 'ig45', w: 1080, h: 1350, comp: 'single', bg: 'table', format: 'jpg', batch: false },
 };
@@ -4431,11 +4487,12 @@ function disposeTree(o) {
   o.traverse((c) => { if (c.geometry) c.geometry.dispose(); });
 }
 
-function boundsOf(root) {
+// all：連平常不算進取景的部分（例如抽出的唱片）也算進去，動畫取景用
+function boundsOf(root, all = false) {
   const box = new THREE.Box3(), tmp = new THREE.Box3();
   root.updateMatrixWorld(true);
   const walk = (o) => {
-    if (o.userData.noBounds) return;
+    if (o.userData.noBounds && !all) return;
     if (o.isMesh && o.material !== undefined) {
       o.geometry.computeBoundingBox();
       tmp.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
@@ -4499,7 +4556,7 @@ function rebuildGeometry(frame, recenter = frame) {
   const P = product(), t = thickness();
   syncPageSlider();
   const k = {
-    d: dims(), t, open: state.open, discOut: state.disc, bkOpen: state.bkOpen, bkFan: state.bkFan, pageArt, labelTex, discTex, models,
+    d: dims(), t, open: state.open, discOut: state.disc, bkOpen: state.bkOpen, bkFan: state.bkFan, discLift: anim.discLift, pageArt, labelTex, discTex, models,
     plainMat: mats.plain, pageMat: mats.page, paperMat: mats.paperPlain,
     layout, mats,
     // 展開圖貼圖的寬度（px）：依即將產生的材質解析度計算，不讀目前的貼圖（換版面時暫時是 1 px 的素色紙）
@@ -4516,7 +4573,7 @@ function rebuildGeometry(frame, recenter = frame) {
     const flipper = new THREE.Group();
     // 站立的物件（例如直立的紙盒）翻面時繞垂直軸轉，看背面而不是倒過來
     flipper.rotation[P.upright?.(k.d) ? 'z' : 'y'] = (ov.flip ?? state.flip) ? Math.PI : 0;
-    flipper.add(P.build({ ...k, open: ov.open ?? k.open, discOut: ov.disc ?? k.discOut }));
+    flipper.add(P.build({ ...k, open: ov.open ?? k.open, discOut: ov.disc ?? k.discOut, bkOpen: ov.bkOpen ?? k.bkOpen, discLift: ov.lift ?? k.discLift }));
     return flipper;
   };
   const root = new THREE.Group();
@@ -4534,9 +4591,10 @@ function rebuildGeometry(frame, recenter = frame) {
   scene.add(root);
   invalidate();
   productObj = root;
-  bounds.copy(boundsOf(root));
+  // 動畫進行中取景範圍固定為整段動畫的範圍，燈光與鏡頭不會跟著每一格的外形跳動
+  bounds.copy(anim.bounds || boundsOf(root));
   updateLight();
-  updateContactShadow();
+  if (!anim.applying) updateContactShadow(); // 動畫套用姿勢後才更新接觸陰影
   if (frame) setView('top', true);
 }
 
@@ -4560,20 +4618,46 @@ function footprint(obj) {
 }
 
 function arrange(root, instance, comp) {
+  // 動畫進行中：每件的擺放位置與間距固定（anim.layout），和播放前的靜態構圖一樣。
+  // 否則每一格都依當下的外形重新置中與量間距，打開時闔上的部分會跟著滑動
+  const fz = anim.active && anim.layout;
+  let putIndex = 0;
+  // 位置與間距以播放前的狀態（和靜態構圖相同）決定；貼齊桌面的高度取整段動畫最低的位置，打開時不會穿過桌面
+  const frozenFootprint = (ov) => {
+    const fp = (st) => {
+      const o = instance({ ...st, ...ov });
+      if (ov.withDisc) o.traverse((c) => { c.userData.noBounds = false; });
+      const b = boundsOf(o);
+      disposeTree(o);
+      return b;
+    };
+    const b = fp(fz.ref);
+    let minz = b.min.z;
+    for (const st of fz.states) minz = Math.min(minz, fp(st).min.z);
+    return { w: b.max.x - b.min.x, h: b.max.y - b.min.y, t: b.max.z - b.min.z, cx: (b.min.x + b.max.x) / 2, cy: (b.min.y + b.max.y) / 2, minz };
+  };
   const put = (ov, x, y, deg = 0, z = 0) => {
     const holder = new THREE.Group();
     const o = instance(ov);
     // 抽出的唱片／光碟平常不算進取景範圍；展示抽出時要算進去，才不會被畫框裁掉
     if (ov.withDisc) o.traverse((c) => { c.userData.noBounds = false; });
     holder.add(o);
-    const f = footprint(o);
+    let f;
+    if (fz) {
+      const i = putIndex++;
+      f = fz.puts[i] ||= frozenFootprint(ov);
+      o.position.z -= f.minz; // 貼齊桌面（取整段動畫最低的位置，不會穿過桌面）
+    } else f = footprint(o);
     o.position.x -= f.cx; o.position.y -= f.cy; // 以自身中心擺放
     holder.position.set(x, y, z);
     holder.rotation.z = deg * DEG;
     root.add(holder);
     return f;
   };
-  const measure = (ov) => { const o = instance(ov); const f = footprint(o); disposeTree(o); return f; };
+  const measure = (ov) => {
+    if (fz) return (fz.measures[JSON.stringify(ov)] ||= frozenFootprint(ov));
+    const o = instance(ov); const f = footprint(o); disposeTree(o); return f;
+  };
   const probe = measure({}); // 目前狀態的尺寸，用來決定間距
   const W = probe.w, H = probe.h, gap = Math.max(W, H) * 0.12;
   const discOut = product().disc !== undefined ? 0.55 : undefined;
@@ -4603,10 +4687,15 @@ function arrange(root, instance, comp) {
       put({ disc: 0 }, -(W + gap) / 2, 0);
       put({ disc: discOut, withDisc: true }, (W + gap) / 2 + W * 0.2, 0);
       break;
-    case 'fan':
-      // 三件由下往上疊，每件轉一點角度；上層抬高一個厚度避免穿插
-      [-14, -5, 6].forEach((deg, i) => put({}, (i - 1) * W * 0.16, (i - 1) * -H * 0.05, deg, i * (probe.t + 0.4)));
+    case 'fan': {
+      // 三件由下往上疊，每件轉一點角度；上層抬高一個厚度避免穿插。
+      // 動畫時只有最上面一件會動，下面兩件維持動畫開始時的狀態（疊在一起的東西不會一起打開），
+      // 疊的高度也以開始時的厚度計算，不會因為打開後變高而懸空
+      const still = fz ? { ...fz.states[0] } : {};
+      const t = fz ? measure(still).t : probe.t;
+      [-14, -5, 6].forEach((deg, i) => put(i < 2 ? still : {}, (i - 1) * W * 0.16, (i - 1) * -H * 0.05, deg, i * (t + 0.4)));
       break;
+    }
     default:
       put({}, 0, 0);
   }
@@ -5052,6 +5141,7 @@ function scheduleTextures(delay = 40) {
 }
 
 function rebuildLayout(frame) {
+  if (anim.active && !anim.exporting) stopAnim(); // 改版面時先結束動畫，還原開合
   layout = product().layout(dims());
   updateSheetInfo();
   renderUploads(); // 上傳欄位、建議尺寸與遮罩的部件選項都依版面而定
@@ -5166,6 +5256,7 @@ function bindProductCat() {
 }
 
 function selectProduct(id) {
+  if (anim.active) stopAnim();
   state.product = id;
   const P = product();
   state.gsm = P.gsm;
@@ -5731,12 +5822,18 @@ function bindScene() {
   $('#bkfan').value = state.bkFan;
   $('#bkfan').addEventListener('input', (e) => { state.bkFan = +e.target.value; rebuildGeometry(false); });
   $('#sweep').addEventListener('change', (e) => { state.sweep = e.target.checked; sweepT0 = performance.now(); if (!state.sweep) updateLight(); });
-  for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => { state.lastView = b.dataset.view; setView(b.dataset.view); });
+  for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => {
+    state.lastView = b.dataset.view;
+    // 動畫進行中：換視角後以新的角度重新取景
+    if (anim.active && !anim.exporting) { const playing = anim.playing; stopAnim(); setView(b.dataset.view, true); startAnim(); if (playing) playAnim(0); return; }
+    setView(b.dataset.view);
+  });
 }
 
 /* ---------- 頂列 ---------- */
 
 function setTab(v) {
+  if (v !== 'photo' && anim.active && !anim.exporting) stopAnim(); // 離開輸出畫面時結束動畫、還原開合
   const wasPhoto = state.view === 'photo';
   state.view = v;
   for (const [id, t] of [['#tab-3d', '3d'], ['#tab-die', 'die']]) $(id).setAttribute('aria-selected', String(v === t));
@@ -5791,6 +5888,7 @@ function renderPhotoComps() {
     fan: '三件相同的品項，適合展示整套或限定版。',
   };
   $('#ph-note').textContent = notes[state.photo.comp] || '';
+  renderVideoAnims();
 }
 
 // 側欄分步驟：左側步驟列一次顯示一個區塊，最後停留的步驟記在瀏覽器（讀寫失敗時從第一步開始）
@@ -5865,6 +5963,7 @@ function bindPhoto() {
   // 「歌本攤開」構圖會暫時改掉托盤、歌本與開合設定；換回其他構圖時還原，不影響使用者原本的設定
   let spreadSaved = null;
   $('#ph-comp').addEventListener('change', (e) => {
+    stopAnim(); // 動畫的擺放是依構圖固定的，換構圖時先結束
     state.photo.comp = e.target.value;
     if (state.photo.comp === 'spread') {
       // 參考圖的擺法：不附托盤的書型 Digipak，歌本黏在右側內頁、隨外盒攤平
@@ -5904,6 +6003,8 @@ function bindPhoto() {
 
 // 下載圖片：單張為取景框內的畫面；批次時每個比例重新取景，結束後回到原本的視角
 async function exportPhoto() {
+  if (anim.exporting) return;
+  stopAnim();
   const btn = $('#ph-dl');
   btn.disabled = true;
   const label = btn.textContent;
@@ -6063,6 +6164,647 @@ function exportImage({ width: targetW, height: targetH, format, transparent, nam
   download(`${name}${transparent ? '-transparent' : ''}.${format}`, url);
 }
 
+/* ================= 動畫與影片 ================= */
+
+// 動畫 = 「時間 → 各項狀態」：開合、取出唱片／光碟、歌本翻頁、從托盤取出光碟、整件旋轉、翻面、光源掃動。
+// 預覽時即時套用；輸出影片時逐格算圖，交給瀏覽器內建的影片編碼器（WebCodecs）壓成 MP4，不會掉格。
+// 播放或輸出結束後還原原本的開合、視角與取景。
+const anim = {
+  active: null, // 目前的動畫（時間軸、長度、開始前的狀態）
+  playing: false, t0: 0,
+  exporting: false, cancel: false,
+  applying: false, // 套用動畫狀態時重建模型，接觸陰影等姿勢套用後再更新
+  discLift: 0, sweep: 0, bounds: null, pivot: null, poseKey: '',
+};
+const MP4_MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.mjs';
+const easeIO = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+// 依序執行的步驟 → 時間軸。步驟：{ set: { 參數: 目標值 }, dur: 秒, hold: 之後停留秒數, linear: 等速 }
+function timeline(base, steps) {
+  const segs = [];
+  let t = 0;
+  const cur = { ...base };
+  for (const st of steps) {
+    if (st.set) {
+      segs.push({ t0: t, t1: t + st.dur, from: { ...cur }, to: { ...cur, ...st.set }, linear: st.linear });
+      Object.assign(cur, st.set);
+      t += st.dur;
+    }
+    t += st.hold || 0;
+  }
+  return {
+    dur: t,
+    at(time) {
+      const v = { ...base };
+      for (const g of segs) {
+        if (time >= g.t1) { Object.assign(v, g.to); continue; }
+        if (time > g.t0) {
+          const k = (time - g.t0) / (g.t1 - g.t0), e = g.linear ? k : easeIO(k);
+          for (const key in g.to) v[key] = g.from[key] + (g.to[key] - g.from[key]) * e;
+        }
+        break;
+      }
+      return v;
+    },
+  };
+}
+
+// 這個品項能做哪些動作
+function animCaps() {
+  const P = product(), d = dims();
+  return {
+    open: P.open !== undefined,
+    disc: P.disc !== undefined,
+    lift: P.id === 'digipak' && d.tray !== 'none', // 從托盤取出光碟
+    booklet: P.id === 'digipak' && bookletOpens(d),
+    flip: !P.upright?.(d), // 站立的紙盒翻面會倒過來，改用轉台
+  };
+}
+const ANIMS = {
+  show: { name: '完整展示（依序打開、取出）', ok: (c) => c.open || c.disc || c.lift },
+  open: { name: '打開與闔上', ok: (c) => c.open },
+  takeout: { name: '取出光碟／唱片', ok: (c) => c.disc || c.lift },
+  turn: { name: '360° 轉台', ok: () => true },
+  flip: { name: '翻面（正面 → 背面）', ok: (c) => c.flip },
+  sweep: { name: '燙金掃光（光源左右掃過）', ok: () => true },
+};
+// 打開到多少比較好看（未列出 = 完全打開）
+const ANIM_OPEN = { fold: 0.8, jewel: 0.72 };
+const ANIM_DISC = 1; // 唱片／光碟抽出的位置（滑桿最右：抽出大半、露出圓標）
+
+function buildAnim(id) {
+  const c = animCaps(), P = product();
+  const openTo = c.lift ? 1 : ANIM_OPEN[P.id] ?? 1; // 取出托盤上的光碟前要先完全攤平
+  const base = { open: state.open, disc: state.disc, bkOpen: state.bkOpen, lift: 0, turn: 0, flip: 0, sweep: 0 };
+  const closed = { ...base, open: c.open ? 0 : base.open, disc: 0, bkOpen: c.booklet ? 0 : base.bkOpen };
+  switch (id) {
+    case 'show': {
+      const steps = [{ hold: 0.6 }];
+      if (c.open) steps.push({ set: { open: openTo }, dur: 2.0, hold: 0.4 });
+      if (c.disc) steps.push({ set: { disc: ANIM_DISC }, dur: 2.4, hold: 0.4 });
+      if (c.lift) steps.push({ set: { lift: 1 }, dur: 2.6, hold: 0.4 });
+      if (c.booklet) steps.push({ set: { bkOpen: 1 }, dur: 2.4, hold: 0.4 });
+      steps.push({ hold: 1.2 });
+      return timeline(closed, steps);
+    }
+    case 'open': {
+      // 可翻開的歌本：外盒打開時歌本保持闔上，外盒完全攤平後歌本才翻開（倒回時先闔上歌本再闔上外盒）
+      if (c.booklet) {
+        return timeline({ ...base, open: 0, bkOpen: 0 }, [
+          { hold: 0.6 },
+          { set: { open: 1 }, dur: 2.2, hold: 0.4 },
+          { set: { bkOpen: 1 }, dur: 2.4, hold: 1.4 },
+        ]);
+      }
+      return timeline({ ...base, open: 0 }, [{ hold: 0.6 }, { set: { open: openTo }, dur: 2.2, hold: 1.4 }]);
+    }
+    case 'takeout': {
+      // 取出光碟時歌本保持闔上，才不會蓋住托盤
+      const st = { ...base, disc: 0, lift: 0, bkOpen: c.booklet ? 0 : base.bkOpen };
+      const steps = [{ hold: 0.6 }];
+      if (c.lift) {
+        if (st.open < 1) steps.push({ set: { open: 1 }, dur: 1.8, hold: 0.3 });
+        steps.push({ set: { lift: 1 }, dur: 2.6, hold: 1.4 });
+      } else steps.push({ set: { disc: ANIM_DISC }, dur: 2.6, hold: 1.4 });
+      return timeline(st, steps);
+    }
+    case 'turn':
+      return { ...timeline(base, [{ set: { turn: 360 }, dur: 9, linear: true }]), loops: true };
+    case 'flip':
+      return timeline(base, [{ hold: 0.8 }, { set: { flip: 1 }, dur: 1.8, hold: 1.4 }]);
+    case 'sweep':
+      return { ...timeline(base, [{ hold: 0.3 }, { set: { sweep: -55 }, dur: 1.5 }, { set: { sweep: 55 }, dur: 3 }, { set: { sweep: 0 }, dur: 1.5, hold: 0.3 }]), loops: true };
+  }
+  return timeline(base, [{ hold: 2 }]);
+}
+
+// 加上速度與「首尾相接」：做完再倒回（轉台、掃光本身就首尾相接）
+function makeSession() {
+  const v = state.video;
+  const tl = buildAnim(v.anim);
+  const mirror = v.loop && !tl.loops;
+  const span = (tl.dur * (mirror ? 2 : 1)) / v.speed;
+  return {
+    dur: span,
+    loop: v.loop || tl.loops,
+    at(sec) {
+      let t = Math.min(Math.max(sec, 0), span) * v.speed;
+      if (mirror && t > tl.dur) t = 2 * tl.dur - t;
+      return tl.at(t);
+    },
+  };
+}
+
+// 把動畫狀態套到場景：需要時重建模型，再套上整件的旋轉／翻面姿勢與光源掃動
+function applyAnim(p, { contact = true } = {}) {
+  let rebuild = !productObj;
+  for (const k of ['open', 'disc', 'bkOpen']) if (Math.abs(state[k] - p[k]) > 1e-4) { state[k] = p[k]; rebuild = true; }
+  if (Math.abs(anim.discLift - p.lift) > 1e-4) { anim.discLift = p.lift; rebuild = true; }
+  if (rebuild) { anim.applying = true; rebuildGeometry(false); anim.applying = false; }
+  const key = `${p.turn.toFixed(3)},${p.flip.toFixed(4)}`;
+  applyPose(p.turn, p.flip);
+  if (contact && (rebuild || key !== anim.poseKey)) updateContactShadow();
+  anim.poseKey = key;
+  if (anim.sweep !== p.sweep || rebuild) { anim.sweep = p.sweep; updateLight(p.sweep); }
+  invalidate();
+}
+
+// 整件的姿勢：turn = 繞垂直軸旋轉（度，轉台）；flip = 0 → 1 翻到背面（和「翻面」同一軸，翻的時候抬高避免穿過桌面）
+function applyPose(turn, flip) {
+  const root = productObj;
+  if (!root) return;
+  root.position.copy(offset);
+  root.quaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+  if (!turn && !flip) return;
+  const pos = root.position, q = root.quaternion;
+  if (flip) {
+    const b = boundsOf(root, true);
+    const c = b.getCenter(new THREE.Vector3());
+    const qf = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI * flip);
+    pos.sub(c).applyQuaternion(qf).add(c);
+    pos.y += ((b.max.x - b.min.x) / 2) * Math.sin(Math.PI * flip);
+    q.premultiply(qf);
+  }
+  if (turn) {
+    const c = anim.pivot || bounds.getCenter(new THREE.Vector3());
+    const pv = new THREE.Vector3(c.x, 0, c.z);
+    const qt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), turn * DEG);
+    pos.sub(pv).applyQuaternion(qt).add(pv);
+    q.premultiply(qt);
+  }
+  root.updateMatrixWorld(true);
+}
+
+// 每個網格（自身座標的外框 8 個角）換到世界座標，收集起來檢查取景；比整體外框貼近實際外形
+function collectCorners(root, pts) {
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    if (!o.isMesh || !o.visible) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    const b = o.geometry.boundingBox;
+    for (let i = 0; i < 8; i++) pts.push(new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(o.matrixWorld));
+  });
+}
+
+// 這些點超出取景框多少倍（≤ 1 = 都在框內；取景框以中心縮成 margin 倍）
+function frameOverflow(pts, margin) {
+  camera.updateMatrixWorld();
+  const fr = state.view === 'photo' && frameRect;
+  const fx0 = fr ? (fr.x / fr.W) * 2 - 1 : -1, fx1 = fr ? ((fr.x + fr.w) / fr.W) * 2 - 1 : 1;
+  const fy0 = fr ? 1 - ((fr.y + fr.h) / fr.H) * 2 : -1, fy1 = fr ? 1 - (fr.y / fr.H) * 2 : 1;
+  const cx = (fx0 + fx1) / 2, cy = (fy0 + fy1) / 2, hx = ((fx1 - fx0) / 2) * margin, hy = ((fy1 - fy0) / 2) * margin;
+  const v = new THREE.Vector3();
+  let f = 0;
+  for (const p of pts) {
+    v.copy(p).project(camera);
+    if (v.z > 1) return Infinity;
+    f = Math.max(f, Math.abs(v.x - cx) / hx, Math.abs(v.y - cy) / hy);
+  }
+  return f;
+}
+
+// 維持目前的視角與中心，只沿著視線往後退到所有點都在框內；退不回來（中心偏太多）時回傳 false
+function pullBackToFit(pts, margin) {
+  if (tween) { camera.position.copy(tween.to); controls.target.copy(tween.toT); tween = null; }
+  let f = frameOverflow(pts, margin);
+  if (f <= 1) return true;
+  const target = controls.target.clone();
+  const dir = camera.position.clone().sub(target);
+  let d = dir.length();
+  dir.normalize();
+  for (let it = 0; it < 6 && f > 1.005; it++) {
+    if (!isFinite(f)) d *= 1.6; else d *= f;
+    camera.position.copy(target).addScaledVector(dir, d);
+    f = frameOverflow(pts, margin);
+  }
+  if (f > 1.02) return false;
+  const r = anim.bounds ? anim.bounds.getSize(new THREE.Vector3()).length() / 2 : d / 4;
+  controls.minDistance = r * 0.3;
+  controls.maxDistance = Math.max(r * 12, d * 1.5);
+  camera.near = d / 60;
+  camera.far = d * 20;
+  camera.updateProjectionMatrix();
+  tableFog = new THREE.Fog(state.bg, d * 2.2, d * 7);
+  scene.fog = backdrop() === 'table' ? tableFog : null;
+  controls.update();
+  return true;
+}
+
+// 取景：維持目前的視角方向，求出剛好讓整個範圍（box 的 8 個角）落在取景框內的距離，並把畫面置中。
+// margin：佔取景框的比例
+function fitCamera(box, margin = 0.88) {
+  // 還在進行的視角切換直接跳到終點（以新視角取景），否則它之後會把鏡頭拉回去
+  if (tween) { camera.position.copy(tween.to); controls.target.copy(tween.toT); tween = null; }
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const fr = state.view === 'photo' && frameRect;
+  const tanV = Math.tan((camera.fov * DEG) / 2) * (fr ? fr.h / fr.H : 1) * margin;
+  const tanH = tanV * (fr ? fr.w / fr.h : camera.aspect);
+  const fwd = dir.clone().negate();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, fwd);
+  const corners = [];
+  for (let i = 0; i < 8; i++) corners.push(new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+  const target = box.getCenter(new THREE.Vector3());
+  let d = 1;
+  for (let it = 0; it < 4; it++) {
+    // 需要的距離：每個角在畫面上的水平、垂直位置都不超過取景框
+    d = 0;
+    for (const p of corners) {
+      const r = p.clone().sub(target);
+      const z = r.dot(fwd);
+      d = Math.max(d, Math.abs(r.dot(right)) / tanH - z, Math.abs(r.dot(up)) / tanV - z);
+    }
+    // 依投影後的上下左右範圍把目標點移到中間
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of corners) {
+      const r = p.clone().sub(target);
+      const depth = d + r.dot(fwd);
+      const sx = r.dot(right) / depth, sy = r.dot(up) / depth;
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    target.addScaledVector(right, ((x0 + x1) / 2) * d).addScaledVector(up, ((y0 + y1) / 2) * d);
+  }
+  // 縮放範圍也要跟著放寬，否則 OrbitControls 會把距離夾回原本的上限
+  const r = box.getSize(new THREE.Vector3()).length() / 2;
+  controls.minDistance = r * 0.3;
+  controls.maxDistance = Math.max(r * 12, d * 1.5);
+  camera.position.copy(target).addScaledVector(dir, d);
+  controls.target.copy(target);
+  camera.near = d / 60;
+  camera.far = d * 20;
+  camera.updateProjectionMatrix();
+  tableFog = new THREE.Fog(state.bg, d * 2.2, d * 7);
+  scene.fog = backdrop() === 'table' ? tableFog : null;
+  controls.update();
+}
+
+// 鏡頭運動：k = 0 → 1 為整段動畫。首尾相接時回到起點
+function applyCam(k) {
+  const a = anim.active;
+  if (!a?.cam0) return;
+  tween = null;
+  const v = a.cam0.pos.clone().sub(a.cam0.target);
+  const mode = state.video.cam;
+  if (mode === 'orbit') v.applyAxisAngle(new THREE.Vector3(0, 1, 0), (a.loop ? -16 * Math.cos(2 * Math.PI * k) : -16 + 32 * easeIO(k)) * DEG);
+  if (mode === 'push') v.multiplyScalar(1 - 0.14 * (a.loop ? Math.sin(Math.PI * k) : easeIO(k)));
+  camera.position.copy(a.cam0.target).add(v);
+  controls.target.copy(a.cam0.target);
+  camera.lookAt(a.cam0.target);
+}
+
+function startAnim() {
+  stopAnim();
+  const ses = makeSession();
+  const snap = { open: state.open, disc: state.disc, bkOpen: state.bkOpen, pos: camera.position.clone(), target: controls.target.clone() };
+  anim.active = { ...ses, snap };
+  anim.pivot = bounds.getCenter(new THREE.Vector3());
+  anim.poseKey = '';
+  // 多件構圖的擺放：取樣整段動畫的開合、取出、歌本狀態，各件的位置與間距以聯集固定
+  const states = [];
+  for (let i = 0; i <= 8; i++) {
+    const p = ses.at((ses.dur * i) / 8);
+    const st = { open: p.open, disc: p.disc, bkOpen: p.bkOpen, lift: p.lift };
+    if (!states.some((q) => Object.keys(st).every((k) => Math.abs(q[k] - st[k]) < 1e-3))) states.push(st);
+  }
+  anim.layout = { states, ref: { open: snap.open, disc: snap.disc, bkOpen: snap.bkOpen, lift: 0 }, puts: [], measures: {} };
+  // 取景：取樣整段動畫（含抽出的唱片、取出的光碟、旋轉），讓取景框容納所有畫面
+  if (state.video.fit) {
+    const box = new THREE.Box3(), pts = [];
+    const N = 16;
+    for (let i = 0; i <= N; i++) {
+      applyAnim(ses.at((ses.dur * i) / N), { contact: false });
+      box.union(boundsOf(productObj, true));
+      collectCorners(productObj, pts);
+    }
+    anim.bounds = box;
+    bounds.copy(box);
+    // 從目前的取景（和靜態構圖相同）開始：整段動畫都在框內就不動；超出時只沿著視線往後退到剛好放得下。
+    // 推近／環繞時多留一些邊
+    const margin = state.video.cam === 'none' ? 0.9 : 0.78;
+    if (!pullBackToFit(pts, margin)) fitCamera(box, margin);
+  } else anim.bounds = bounds.clone();
+  anim.active.cam0 = { pos: camera.position.clone(), target: controls.target.clone() };
+  anim.poseKey = '';
+  applyAnim(ses.at(0));
+  applyCam(0);
+  syncVideoUI();
+}
+
+function stopAnim() {
+  const a = anim.active;
+  anim.playing = false;
+  if (!a) return;
+  anim.active = null; anim.bounds = null; anim.pivot = null; anim.discLift = 0; anim.sweep = 0; anim.camDirty = false; anim.layout = null;
+  state.open = a.snap.open; state.disc = a.snap.disc; state.bkOpen = a.snap.bkOpen;
+  $('#open').value = state.open; $('#disc').value = state.disc; $('#bkopen').value = state.bkOpen;
+  rebuildGeometry(false);
+  camera.position.copy(a.snap.pos); controls.target.copy(a.snap.target); controls.update();
+  updateLight();
+  invalidate();
+  syncVideoUI();
+}
+
+// 動畫暫停時使用者自己轉動或縮放鏡頭：之後的播放與輸出都以使用者調整後的鏡頭為準
+controls.addEventListener('start', () => {
+  if (!anim.active || anim.exporting) return;
+  anim.playing = false;
+  anim.camDirty = true;
+  syncVideoUI(+$('#vd-time').value);
+});
+function adoptCamera() {
+  if (!anim.camDirty || !anim.active) return;
+  anim.active.cam0 = { pos: camera.position.clone(), target: controls.target.clone() };
+  anim.camDirty = false;
+}
+
+function playAnim(k = 0) {
+  if (!anim.active) startAnim();
+  adoptCamera();
+  anim.playing = true;
+  anim.t0 = performance.now() - (k < 0.999 ? k : 0) * anim.active.dur * 1000;
+  syncVideoUI(k);
+}
+
+function seekAnim(k) {
+  const a = anim.active;
+  if (!a) return;
+  adoptCamera();
+  applyAnim(a.at(k * a.dur));
+  applyCam(k);
+  syncVideoUI(k);
+}
+
+// 預覽：即時播放，播完自動重播
+function stepPreview(now) {
+  const a = anim.active;
+  if (!a) { anim.playing = false; return; }
+  let sec = (now - anim.t0) / 1000;
+  if (sec >= a.dur) { sec %= a.dur; anim.t0 = now - sec * 1000; }
+  applyAnim(a.at(sec));
+  applyCam(sec / a.dur);
+  syncVideoUI(sec / a.dur);
+}
+
+function syncVideoUI(k) {
+  const a = anim.active;
+  $('#vd-play').textContent = anim.playing ? '❚❚ 暫停' : '▶ 播放預覽';
+  $('#vd-stop').disabled = !a || anim.exporting;
+  $('#vd-play').disabled = anim.exporting;
+  if (k === undefined) k = a ? 0 : 0;
+  const dur = a ? a.dur : makeSession().dur;
+  $('#vd-time').value = k;
+  $('#vd-tlabel').textContent = `${(k * dur).toFixed(1)} / ${dur.toFixed(1)} 秒`;
+}
+
+// 構圖不適用的動畫與原因（品項本身做不到的動作另外由 animCaps 排除，不列出）
+function compBlocks(comp, c) {
+  const b = {};
+  const multi = !['single', 'reveal'].includes(comp);
+  if (multi) b.flip = '多件構圖翻面會整組一起翻轉';
+  if (comp === 'pair') {
+    b.show = b.open = b.takeout = '背面那件是翻過來放的，打開或取出會穿過桌面';
+  }
+  if (comp === 'openClosed') {
+    b.show = b.open = '這個構圖已固定兩件的開合';
+    if (c.lift) b.takeout = '從托盤取出光碟需要外盒完全攤平';
+  }
+  if (comp === 'reveal' || comp === 'revealPair') b.show = b.takeout = '這個構圖已固定唱片／光碟抽出的位置';
+  if (comp === 'fan' && c.lift) b.show = b.takeout = '堆疊時從托盤取出的光碟會懸空';
+  return b;
+}
+
+// 列出這個品項可用的動畫；目前構圖不適用的選項停用，並在下方說明原因
+function renderVideoAnims() {
+  const c = animCaps(), blocks = compBlocks(state.photo.comp, c);
+  const list = Object.entries(ANIMS).filter(([, a]) => a.ok(c));
+  const usable = list.filter(([k]) => !blocks[k]);
+  // 使用者最後選的動畫（want）在這個構圖可用時就選回它
+  const want = state.video.want || state.video.anim;
+  state.video.anim = usable.some(([k]) => k === want) ? want : (usable[0] || list[0])[0];
+  $('#vd-anim').innerHTML = list.map(([k, a]) => `<option value="${k}"${blocks[k] ? ' disabled' : ''}>${a.name}${blocks[k] ? '（此構圖不適用）' : ''}</option>`).join('');
+  $('#vd-anim').value = state.video.anim;
+  updateVideoNote();
+  syncVideoUI();
+}
+
+const VIDEO_NOTE = '影片尺寸依上方的輸出尺寸（最長邊 1920 px，選 4K 時 3840 px）；透明背景會改為白底。輸出時逐格算圖，需要的時間約為影片長度的數倍。';
+function updateVideoNote() {
+  if (anim.exporting) return;
+  const c = animCaps(), blocks = compBlocks(state.photo.comp, c);
+  const off = Object.entries(ANIMS).filter(([k, a]) => a.ok(c) && blocks[k]);
+  // 同一個原因的動畫合併成一句
+  const byReason = new Map();
+  for (const [k, a] of off) byReason.set(blocks[k], [...(byReason.get(blocks[k]) || []), a.name.split('（')[0]]);
+  const tips = [...byReason].map(([why, names]) => `${names.join('、')}：${why}，此構圖不提供。`);
+  if (state.photo.comp === 'fan') tips.push('三件堆疊時只有最上面一件會動。');
+  $('#vd-note').textContent = [...tips, VIDEO_NOTE].join('\n');
+}
+
+// 影片尺寸：依輸出圖片的尺寸，最長邊 1920 px（選 4K 時 3840 px），長寬取偶數（H.264 的要求）
+function videoSize() {
+  const { w, h } = photoSize();
+  const maxLong = state.photo.size === 'k4' ? 3840 : 1920;
+  const sc = Math.min(1, maxLong / Math.max(w, h));
+  return { w: Math.max(2, Math.round((w * sc) / 2) * 2), h: Math.max(2, Math.round((h * sc) / 2) * 2) };
+}
+
+// 逐格編碼：WebCodecs VideoEncoder → mp4-muxer 封裝成 MP4（H.264；不支援時試 VP9／AV1）
+async function createEncoder(w, h, fps) {
+  if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') return null;
+  const big = Math.ceil(w / 16) * Math.ceil(h / 16) > 8192; // 超過 1080p 的畫面要用較高的 H.264 等級
+  const cands = [
+    ...(big ? ['avc1.640033', 'avc1.4d0033'] : ['avc1.640028', 'avc1.4d0028', 'avc1.42001f']).map((c) => ({ codec: c, mux: 'avc' })),
+    { codec: 'vp09.00.40.08', mux: 'vp9' },
+    { codec: 'av01.0.08M.08', mux: 'av1' },
+  ];
+  const bitrate = Math.round(Math.min(40e6, w * h * fps * 0.2));
+  let cfg = null, mux = null;
+  for (const c of cands) {
+    const conf = { codec: c.codec, width: w, height: h, bitrate, framerate: fps, ...(c.mux === 'avc' ? { avc: { format: 'avc' } } : {}) };
+    try { if ((await VideoEncoder.isConfigSupported(conf)).supported) { cfg = conf; mux = c.mux; break; } } catch { /* 試下一個 */ }
+  }
+  if (!cfg) return null;
+  const { Muxer, ArrayBufferTarget } = await import(MP4_MUXER_URL);
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({ target, video: { codec: mux, width: w, height: h, frameRate: fps }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' });
+  let err = null;
+  const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { err = e; } });
+  encoder.configure(cfg);
+  return {
+    codec: mux, ext: 'mp4',
+    async add(canvas, i) {
+      if (err) throw err;
+      const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
+      encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      frame.close();
+      while (encoder.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 4));
+    },
+    async finish() {
+      await encoder.flush();
+      if (err) throw err;
+      encoder.close();
+      muxer.finalize();
+      return new Blob([target.buffer], { type: 'video/mp4' });
+    },
+    close() { try { if (encoder.state !== 'closed') encoder.close(); } catch { /* 已關閉 */ } },
+  };
+}
+
+// 不支援 WebCodecs 時的備案：即時播放並錄下畫面（MediaRecorder，依瀏覽器輸出 MP4 或 WebM）
+function realtimeRecorder(canvas, fps, w, h) {
+  if (typeof MediaRecorder === 'undefined' || !canvas.captureStream) return null;
+  const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+  if (!mime) return null;
+  return { mime, ext: mime.startsWith('video/mp4') ? 'mp4' : 'webm', bitrate: Math.round(Math.min(40e6, w * h * fps * 0.2)) };
+}
+
+async function exportVideo() {
+  if (anim.exporting) { anim.cancel = true; return; }
+  const btn = $('#vd-dl'), note = $('#vd-note');
+  const label = btn.textContent;
+  const v = state.video, fps = v.fps;
+  const { w, h } = videoSize();
+  anim.exporting = true; anim.cancel = false;
+  btn.textContent = '取消輸出';
+  syncVideoUI();
+  // 超取樣：以 1.5 倍算圖再縮小（畫面較大時自動降低），細字與燙金邊緣較銳利
+  const ss = matchMedia('(pointer: coarse)').matches ? 1 : Math.max(1, Math.min(1.5, Math.sqrt(6e6 / (w * h))));
+  const rw = Math.round(w * ss), rh = Math.round(h * ss);
+  const size = renderer.getSize(new THREE.Vector2()), pr = renderer.getPixelRatio();
+  const fr = frameRect;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  const transparent = backdrop() === 'transparent';
+  let enc = null, sized = false;
+  // 算出時間點 sec 的畫面，畫到 out（影片不支援透明，透明背景改為白底）
+  const frameAt = (sec) => {
+    const a = anim.active;
+    applyAnim(a.at(sec));
+    applyCam(sec / a.dur);
+    updateLight(anim.sweep); updateGlint(anim.sweep); updateFillRim(anim.sweep);
+    renderFrame();
+    if (transparent) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); } else ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(renderer.domElement, 0, 0, rw, rh, 0, 0, w, h);
+  };
+  try {
+    // 已經在預覽：沿用目前的取景（包含使用者調整過的鏡頭）；否則重新開始並自動取景
+    if (anim.active) { anim.playing = false; adoptCamera(); } else startAnim();
+    const a = anim.active;
+    const frames = Math.max(1, Math.round(a.dur * fps));
+    // 材質解析度提高到影片需要的密度（和輸出圖片相同）
+    const q = exportTextureQuality(h);
+    if (q > state.quality) {
+      note.textContent = '提高材質解析度中…';
+      exportQuality = q;
+      await regenTextures();
+    }
+    note.textContent = '準備影片編碼器…';
+    enc = await createEncoder(w, h, fps);
+    if (fr) { camera.setViewOffset(fr.W, fr.H, fr.x, fr.y, fr.w, fr.h); camera.updateProjectionMatrix(); }
+    renderer.setPixelRatio(1);
+    renderer.setSize(rw, rh, false);
+    sizeComposer(rw, rh, 1);
+    sized = true;
+    let blob, ext;
+    if (enc) {
+      const t0 = performance.now();
+      for (let i = 0; i < frames; i++) {
+        if (anim.cancel) throw new Error('cancel');
+        frameAt(i / fps);
+        await enc.add(out, i);
+        if (i % 2 === 0) {
+          const pct = Math.round(((i + 1) / frames) * 100);
+          const left = ((performance.now() - t0) / (i + 1)) * (frames - i - 1) / 1000;
+          note.textContent = `輸出影片中… ${pct}%（第 ${i + 1} / ${frames} 格，約剩 ${Math.ceil(left)} 秒）`;
+          syncVideoUI(i / frames);
+          await new Promise((r) => setTimeout(r, 0)); // 讓畫面更新進度
+        }
+      }
+      note.textContent = '封裝 MP4…';
+      blob = await enc.finish();
+      ext = 'mp4';
+    } else {
+      const rec = realtimeRecorder(out, fps, w, h);
+      if (!rec) throw new Error('這個瀏覽器不支援影片輸出，請改用最新版 Chrome、Edge 或 Safari');
+      note.textContent = '這個瀏覽器不支援逐格編碼，改為即時錄影（電腦較慢時可能掉格）…';
+      const stream = out.captureStream(fps);
+      const mr = new MediaRecorder(stream, { mimeType: rec.mime, videoBitsPerSecond: rec.bitrate });
+      const chunks = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      const stopped = new Promise((r) => { mr.onstop = r; });
+      mr.start();
+      await new Promise((resolve) => {
+        const t0 = performance.now();
+        const step = (now) => {
+          const sec = (now - t0) / 1000;
+          if (sec >= a.dur || anim.cancel) { resolve(); return; }
+          frameAt(sec);
+          syncVideoUI(sec / a.dur);
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      });
+      mr.stop();
+      await stopped;
+      if (anim.cancel) throw new Error('cancel');
+      blob = new Blob(chunks, { type: rec.mime });
+      ext = rec.ext;
+    }
+    const url = URL.createObjectURL(blob);
+    download(`proofroom-${state.product}-${v.anim}-${w}x${h}.${ext}`, url);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    note.textContent = `已輸出 ${w} × ${h}、${fps} fps、${a.dur.toFixed(1)} 秒（${(blob.size / 1048576).toFixed(1)} MB）。`;
+  } catch (e) {
+    if (e.message === 'cancel') note.textContent = '已取消輸出。';
+    else { console.error(e); note.textContent = '影片輸出失敗：' + (e.message || e); }
+  } finally {
+    enc?.close();
+    if (sized) {
+      renderer.setPixelRatio(pr);
+      renderer.setSize(size.x, size.y, false);
+      sizeComposer(size.x, size.y, pr);
+    }
+    if (fr) { camera.clearViewOffset(); camera.updateProjectionMatrix(); }
+    anim.exporting = false;
+    stopAnim();
+    if (exportQuality) { exportQuality = 0; texturesUI(); }
+    btn.textContent = label;
+    syncVideoUI();
+  }
+}
+
+function bindVideo() {
+  const v = state.video;
+  // 改動畫設定：重新建立時間軸（播放中就從頭重播）
+  const restart = () => { const playing = anim.playing; if (anim.active) { stopAnim(); if (playing) playAnim(0); } syncVideoUI(); };
+  $('#vd-anim').addEventListener('change', (e) => { v.anim = v.want = e.target.value; updateVideoNote(); restart(); });
+  $('#vd-cam').value = v.cam;
+  $('#vd-cam').addEventListener('change', (e) => { v.cam = e.target.value; restart(); });
+  $('#vd-speed').value = String(v.speed);
+  $('#vd-speed').addEventListener('change', (e) => { v.speed = +e.target.value; restart(); });
+  $('#vd-fps').value = String(v.fps);
+  $('#vd-fps').addEventListener('change', (e) => { v.fps = +e.target.value; });
+  $('#vd-loop').checked = v.loop;
+  $('#vd-loop').addEventListener('change', (e) => { v.loop = e.target.checked; restart(); });
+  $('#vd-fit').checked = v.fit;
+  $('#vd-fit').addEventListener('change', (e) => { v.fit = e.target.checked; restart(); });
+  $('#vd-play').addEventListener('click', () => {
+    if (anim.playing) { anim.playing = false; syncVideoUI(+$('#vd-time').value); return; }
+    playAnim(anim.active ? +$('#vd-time').value : 0);
+  });
+  $('#vd-stop').addEventListener('click', () => stopAnim());
+  $('#vd-time').addEventListener('input', (e) => {
+    const k = +e.target.value; // 先讀值：startAnim 會把時間軸歸零
+    if (!anim.active) startAnim();
+    anim.playing = false;
+    seekAnim(k);
+  });
+  $('#vd-dl').addEventListener('click', exportVideo);
+  updateVideoNote();
+}
+
 /* ================= 迴圈 ================= */
 
 let sweepT0 = 0;
@@ -6108,7 +6850,8 @@ const lastCam = new THREE.Matrix4();
 function invalidate(ms = 300) { renderUntil = Math.max(renderUntil, performance.now() + ms); }
 function loop(now) {
   requestAnimationFrame(loop);
-  if (state.view === 'die') return;
+  if (state.view === 'die' || anim.exporting) return; // 輸出影片時由輸出流程自己逐格算圖
+  if (anim.playing) stepPreview(now);
   if (tween) {
     const k = clamp((now - tween.t0) / 550);
     const e = 1 - Math.pow(1 - k, 3);
@@ -6116,18 +6859,19 @@ function loop(now) {
     controls.target.lerpVectors(tween.fromT, tween.toT, e);
     if (k >= 1) tween = null;
   }
-  if (state.sweep) updateLight(Math.sin((now - sweepT0) / 1000 * 0.6) * 60);
+  const sw = (state.sweep ? Math.sin((now - sweepT0) / 1000 * 0.6) * 60 : 0) + anim.sweep;
+  if (state.sweep) updateLight(sw);
   const orbiting = controls.update();
   // 鏡頭有沒有動（包含程式直接設定的位置）
   camera.updateMatrixWorld();
   const moved = !lastCam.equals(camera.matrixWorld);
   if (moved) lastCam.copy(camera.matrixWorld);
   const motion = !!tween || orbiting || moved;
-  if (!motion && !state.sweep && now > renderUntil && !hqPending) return;
-  const sw = state.sweep ? Math.sin((now - sweepT0) / 1000 * 0.6) * 60 : 0;
+  if (!motion && !state.sweep && !anim.playing && now > renderUntil && !hqPending) return;
   updateGlint(sw);
   updateFillRim(sw);
-  if (motion) { renderFrame(false, true); hqPending = true; return; }
+  // 轉動鏡頭或播放動畫時略過縫隙陰影，保持流暢；停下來後補一張完整品質
+  if (motion || anim.playing) { renderFrame(false, true); hqPending = true; return; }
   renderFrame();
   hqPending = false;
 }
@@ -6151,7 +6895,7 @@ async function init() {
   refreshSampleFonts();
   loadScenePrefs();
   setBackground();
-  bindProductCat(); bindDims(); bindPaper(); bindLayers(); bindScene(); bindTop(); bindPhoto(); bindSteps();
+  bindProductCat(); bindDims(); bindPaper(); bindLayers(); bindScene(); bindTop(); bindPhoto(); bindVideo(); bindSteps();
   renderPapers();
   composeDisc();
   // 公開版（build.mjs --public）不讀取寶麗盒實體模型：模型授權不允許公開散佈
